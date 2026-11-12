@@ -1,0 +1,27 @@
+name: Release assets
+on:
+  release:
+    types: [published]
+permissions:
+  contents: write
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/build-meta.cjs
+      - name: Verify tag and metadata
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          node -e 'const p=require("./package.json"); if(process.env.RELEASE_TAG!=="v"+p.version) process.exit(1)'
+          git diff --exit-code -- iwara-plus.meta.js
+          sha256sum iwara-plus.user.js iwara-plus.meta.js > SHA256SUMS.txt
+      - name: Upload installable script and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" iwara-plus.user.js iwara-plus.meta.js SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber

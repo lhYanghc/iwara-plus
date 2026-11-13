@@ -27,6 +27,44 @@ body.menu-open .content{padding-left:260px}.container-fluid{display:flex;width:1
 <div class="stats"><div class="stats__number"><i class="fa-heart"></i>428</div><div class="stats__number"><i class="fa-eye"></i>6,744</div></div></div></div>
 <aside class="col-md-3 page-video__sidebar">原始侧栏</aside></div></div></section></body></html>`;
 
+test('browser: holds playback until user activation for each video route', async () => {
+  const browser = await chromium.launch({ channel: 'chrome', args: ['--autoplay-policy=no-user-gesture-required'] });
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript({ content: script });
+    await page.route('**/*', route => route.fulfill({
+      contentType: 'text/html',
+      body: '<div class="page-video__player"><video autoplay muted></video><button class="vjs-play-control" onclick="document.querySelector(\'video\').play()">Play</button></div>'
+    }));
+    await page.goto('https://www.iwara.tv/video/first/title');
+    // A local media stream lets Chrome actually play without a network fixture.
+    await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      const video = document.querySelector('video');
+      video.srcObject = canvas.captureStream(10);
+      canvas.getContext('2d').fillRect(0, 0, 10, 10);
+    });
+    const tryAutoplay = () => page.evaluate(async () => {
+      const video = document.querySelector('video');
+      const attempted = new Promise(resolve => video.addEventListener('play', resolve, { once: true }));
+      video.play().catch(() => {});
+      await attempted;
+      return video.paused;
+    });
+    assert.equal(await page.locator('video').getAttribute('autoplay'), null);
+    assert.equal(await tryAutoplay(), true);
+    await page.locator('button').click();
+    await page.waitForFunction(() => !document.querySelector('video').paused);
+    await page.evaluate(() => {
+      document.querySelector('video').pause();
+      history.pushState({}, '', '/video/second/title');
+    });
+    assert.equal(await tryAutoplay(), true);
+    await page.locator('button').press('Enter');
+    await page.waitForFunction(() => !document.querySelector('video').paused);
+  } finally { await browser.close(); }
+});
+
 test('browser: menu widths, reversible roll animation, and light/dark themes', async () => {
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   try {

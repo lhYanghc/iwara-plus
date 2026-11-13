@@ -143,6 +143,22 @@ test('one-click skips already liked or followed states', async () => {
     assert.equal(counts.like, 1); assert.equal(counts.follow, 1);
   } finally { dom.window.dispatchEvent(new dom.window.Event('pagehide')); dom.window.close(); }
 });
+test('replacing details and nesting the fullscreen button preserves working controls', async () => {
+  const { dom, w } = await setup();
+  try {
+    const doc = w.document;
+    const replacement = doc.createElement('div');
+    replacement.className = 'page-video__details';
+    replacement.innerHTML = '<h1 class="text--h1">Second</h1><div class="page-video__actions"><button>New actions</button></div>';
+    doc.querySelector('.page-video__details').replaceWith(replacement);
+    doc.querySelector('.vjs-control-bar').innerHTML = '<span><button class="vjs-fullscreen-control"></button></span>';
+    await tick();
+    assert.equal(doc.querySelectorAll('.page-video__actions').length, 1);
+    assert.equal(doc.querySelector('#iwp-toolbar .page-video__actions').textContent.includes('New actions'), true);
+    assert.equal(replacement.previousElementSibling.id, 'iwp-toolbar');
+    assert.equal(doc.querySelectorAll('.vjs-control-bar .iwp-theatre-toggle').length, 1);
+  } finally { w.dispatchEvent(new w.Event('pagehide')); w.close(); }
+});
 test('statistics arriving after the action row moved are also aligned and restored', async () => {
   const { dom, w } = await setup();
   try {

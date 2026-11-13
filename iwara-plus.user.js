@@ -2,7 +2,7 @@
 // @name         Iwara Plus — Enhancements & Theatre
 // @name:zh-CN   Iwara Plus — 增强与影院融合版
 // @namespace    iwara-plus
-// @version      1.0.11
+// @version      1.0.12
 // @author       lhYanghc
 // @homepageURL  https://github.com/lhYanghc/iwara-plus
 // @supportURL   https://github.com/lhYanghc/iwara-plus/issues
@@ -16,7 +16,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_setClipboard
-// @run-at       document-idle
+// @run-at       document-start
 // @noframes
 // @license      AGPL-3.0-or-later
 // ==/UserScript==
@@ -27,7 +27,8 @@
 // xymopen's Theatre for iwara. See THIRD_PARTY.md for source provenance.
 (() => {
   'use strict';
-  if (document.getElementById('iwp-style')) return;
+  if (window.__iwaraPlusInstalled) return;
+  window.__iwaraPlusInstalled = true;
   const $ = (selector, root = document) => root.querySelector(selector);
   const all = (selector, root = document) => [...root.querySelectorAll(selector)];
   const load = (key, fallback) => {
@@ -88,12 +89,44 @@
     .iwp-theatre video {object-fit:contain}
     .iwp-theatre-toggle {cursor:pointer}
   `;
-  document.head.append(style);
 
   let current = null;
   let queued = false;
   let suspended = false;
   const videoId = () => location.pathname.match(/^\/video\/([^/]+)/)?.[1] || null;
+  let playbackId;
+  let manualPlayback = false;
+  function syncPlaybackRoute() {
+    const id = videoId();
+    if (id !== playbackId) {
+      playbackId = id;
+      manualPlayback = false;
+    }
+    return id;
+  }
+  function recordPlayIntent(event) {
+    if (!event.isTrusted || !syncPlaybackRoute()) return;
+    const target = event.target;
+    const player = target.closest?.('.page-video__player');
+    if (!player) return;
+    const playControl = target.closest('video, .vjs-big-play-button, .vjs-play-control, .vjs-poster');
+    if (event.type === 'keydown') {
+      if (event.repeat || ![' ', 'Enter', 'k', 'K'].includes(event.key)) return;
+      if (!playControl && !target.matches('.video-js, .page-video__player')) return;
+    } else if (event.button !== 0 || !playControl) return;
+    manualPlayback = true;
+  }
+  for (const type of ['pointerdown', 'click', 'keydown']) document.addEventListener(type, recordPlayIntent, true);
+  function holdPlayback(video) {
+    if (!syncPlaybackRoute() || manualPlayback) return;
+    video.removeAttribute('autoplay');
+    if (!video.paused) video.pause();
+  }
+  for (const type of ['play', 'playing']) {
+    document.addEventListener(type, event => {
+      if (event.target.matches?.('.page-video__player video')) holdPlayback(event.target);
+    }, true);
+  }
   const element = (tag, text, attributes = {}) => {
     const node = document.createElement(tag);
     if (text) node.textContent = text;
@@ -261,7 +294,8 @@
       ctx.control = element('button', '', { type: 'button', class: 'vjs-control vjs-button iwp-theatre-toggle', title: settings.theatre ? '退出影院模式' : '进入影院模式', 'aria-label': '切换影院模式', 'aria-pressed': String(settings.theatre) });
       ctx.control.append(element('span', '', { class: 'vjs-icon-placeholder vjs-icon-square', 'aria-hidden': 'true' }), element('span', '影院模式', { class: 'vjs-control-text' }));
       ctx.control.addEventListener('click', () => toggle(ctx));
-      bar.insertBefore(ctx.control, $('.vjs-fullscreen-control', bar));
+      const fullscreen = $('.vjs-fullscreen-control', bar);
+      bar.insertBefore(ctx.control, fullscreen?.parentNode === bar ? fullscreen : null);
     }
     const source = $('.vjs-menu-item.resolution-Source', ctx.player);
     if (settings.source && source && ctx.sourceItem !== source) {
@@ -292,7 +326,7 @@
     old.control?.remove();
   }
   function mount(id, player, details) {
-    const ctx = { id, player, nativeActions: new Map(), nativeStats: new Map(), abort: new AbortController() };
+    const ctx = { id, player, details, nativeActions: new Map(), nativeStats: new Map(), abort: new AbortController() };
     current = ctx;
     ctx.toolbar = element('div', '', { id: 'iwp-toolbar', role: 'group', 'aria-label': 'Iwara Plus' });
     details.before(ctx.toolbar);
@@ -378,10 +412,13 @@
   function sync() {
     queued = false;
     if (suspended) return;
-    const id = videoId();
+    if (document.head && !style.isConnected) document.head.append(style);
+    const id = syncPlaybackRoute();
     const player = $('.page-video__player');
     const details = $('.page-video__details');
-    if (current && (current.id !== id || !current.player.isConnected || !current.toolbar.isConnected || (player && player !== current.player))) dispose();
+    if (current && (current.id !== id || current.details !== details || !current.player.isConnected || !current.toolbar.isConnected || (player && player !== current.player))) dispose();
+    const video = player && $('video', player);
+    if (id && video) holdPlayback(video);
     if (id && player && details) {
       if (!current) mount(id, player, details);
       else enhance(current);
@@ -391,14 +428,15 @@
     if (!suspended && !queued) { queued = true; queueMicrotask(sync); }
   }
   const observer = new MutationObserver(schedule);
-  const observeOptions = { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['title'] };
-  observer.observe(document.body, observeOptions);
+  const observeOptions = { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['title', 'autoplay'] };
+  observer.observe(document, observeOptions);
   window.addEventListener('popstate', schedule);
   window.addEventListener('urlchange', schedule);
   // Route changes may precede DOM updates; also works in isolated userscript worlds.
   let routeTimer = setInterval(schedule, 750);
   window.addEventListener('pagehide', () => {
     suspended = true;
+    playbackId = null;
     observer.disconnect();
     clearInterval(routeTimer);
     dispose();
@@ -406,7 +444,7 @@
   window.addEventListener('pageshow', () => {
     if (!suspended) return;
     suspended = false;
-    observer.observe(document.body, observeOptions);
+    observer.observe(document, observeOptions);
     routeTimer = setInterval(schedule, 750);
     schedule();
   });

@@ -24,6 +24,7 @@ You can also import `iwara-plus.user.js` as a local file, or paste its full cont
 - **A compact, collapsible panel:** starts closed on each video. Tools unfold downwards with a scroll-like reveal; the divider and centered chevron move with the lower edge. The chevron flips vertically after most of the reveal finishes. Reduced-motion preferences are respected.
 - **Five filename choices:** each option shows the actual name that will be copied, based on the current title, author, and upload date, with Windows-invalid characters removed. There is no duplicate filename outside the selector.
 - **Copy and download tools:** copy a name, request the site's Source download, open the cover image, or explicitly run copy + Like + Follow + download together.
+- Videos open paused, including when navigating between videos. Use the player's play control to start playback.
 - **Source selection:** automatically selects a newly discovered Source option; you can turn it off. It does not continuously override manual resolution changes.
 - **Always-visible video data:** resolution and estimated playback frame rate sit beside the original like/view counts, using the same typography. The data group wraps together on narrow screens, and low-quality readings keep their color warning.
 - **SPA lifecycle handling:** cleans up old requests, controls, video events, and frame callbacks when navigating between videos. An unavailable upload-date API does not block the rest of the interface.
@@ -49,7 +50,7 @@ pnpm test
 pnpm build:meta
 ```
 
-The 12 automated tests cover lifecycle cleanup, theatre restoration, actual copied names, active Like/Follow protection, missing downloads, failed metadata, portrait video dimensions, and video replacement. Headless Chrome tests use a local fixture at widths of 390, 600, 1000, and 1440 pixels to check menu changes, animations, wrapping, and theme changes. All fixture requests are intercepted; tests do not use your personal Chrome profile or real Iwara content.
+The 14 automated tests cover autoplay prevention, player and details controls, lifecycle cleanup, theatre restoration, actual copied names, active Like/Follow protection, missing downloads, failed metadata, portrait video dimensions, and video replacement. Headless Chrome tests use a local fixture at widths of 390, 600, 1000, and 1440 pixels to check menu changes, animations, wrapping, and theme changes. All fixture requests are intercepted; tests do not use your personal Chrome profile or real Iwara content.
 
 These checks do not guarantee compatibility with every live website version, account, or playback scenario. See [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md) for contribution and version details.
 

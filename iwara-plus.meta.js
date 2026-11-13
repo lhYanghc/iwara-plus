@@ -2,7 +2,7 @@
 // @name         Iwara Plus — Enhancements & Theatre
 // @name:zh-CN   Iwara Plus — 增强与影院融合版
 // @namespace    iwara-plus
-// @version      1.0.11
+// @version      1.0.12
 // @author       lhYanghc
 // @homepageURL  https://github.com/lhYanghc/iwara-plus
 // @supportURL   https://github.com/lhYanghc/iwara-plus/issues
@@ -16,7 +16,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_setClipboard
-// @run-at       document-idle
+// @run-at       document-start
 // @noframes
 // @license      AGPL-3.0-or-later
 // ==/UserScript==

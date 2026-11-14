@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         Iwara Plus — Enhancements & Theatre
 // @name:zh-CN   Iwara Plus — 增强与影院融合版
+// @name:ja      Iwara Plus — 拡張機能とシアターモード
 // @namespace    iwara-plus
-// @version      1.0.12
+// @version      1.0.13
 // @author       lhYanghc
 // @homepageURL  https://github.com/lhYanghc/iwara-plus
 // @supportURL   https://github.com/lhYanghc/iwara-plus/issues
@@ -11,6 +12,7 @@
 // @icon         https://www.iwara.tv/logo.png
 // @description  Native-style Iwara enhancements: responsive theatre, filename copying, Source downloads, and playback quality estimates.
 // @description:zh-CN 复制命名、喜欢关注下载、原画、画质检测与可记忆的影院模式
+// @description:ja ファイル名のコピー、元画質のダウンロード、画質情報の表示とシアターモード。
 // @match        https://www.iwara.tv/*
 // @match        https://iwara.tv/*
 // @grant        GM_getValue
@@ -34,7 +36,52 @@
   const load = (key, fallback) => {
     try { return GM_getValue(key, fallback); } catch { return fallback; }
   };
-  const settings = { type: 'name', theatre: true, source: true, ...load('iwp-settings', {}) };
+  const translations = {
+    '复制名字': { en: 'Copy filename', ja: 'ファイル名をコピー' },
+    '下载原画': { en: 'Download Source', ja: '元画質でダウンロード' },
+    '复制＋喜欢＋关注＋下载': { en: 'Copy, like, follow and download', ja: 'コピー・いいね・フォロー・ダウンロード' },
+    '打开封面': { en: 'Open cover image', ja: 'カバー画像を開く' },
+    '自动原画': { en: 'Prefer Source quality', ja: '元画質を優先' },
+    '视频数据': { en: 'Video statistics', ja: '動画の統計' },
+    '增强功能': { en: 'Enhancements', ja: '拡張機能' },
+    '展开增强功能': { en: 'Show enhancements', ja: '拡張機能を表示' },
+    '收起增强功能': { en: 'Hide enhancements', ja: '拡張機能を閉じる' },
+    '选择要复制的名称': { en: 'Choose a filename to copy', ja: 'コピーするファイル名を選択' },
+    '自动播放': { en: 'Autoplay', ja: '自動再生' },
+    '自动播放：开启': { en: 'Autoplay on', ja: '自動再生オン' },
+    '自动播放：关闭': { en: 'Autoplay off', ja: '自動再生オフ' },
+    '切换影院模式': { en: 'Toggle theatre mode', ja: 'シアターモードを切り替える' },
+    '进入影院模式': { en: 'Enter theatre mode', ja: 'シアターモードにする' },
+    '退出影院模式': { en: 'Exit theatre mode', ja: 'シアターモードを終了' },
+    '作品标题尚未加载': { en: 'Video title has not loaded yet', ja: '動画タイトルはまだ読み込まれていません' },
+    '作者尚未加载': { en: 'Author has not loaded yet', ja: '投稿者はまだ読み込まれていません' },
+    '上传日期尚未加载，请稍后重试': { en: 'Upload date has not loaded yet. Try again shortly.', ja: '投稿日を読み込み中です。しばらくしてからお試しください。' },
+    '等待视频画质信息': { en: 'Waiting for video quality information', ja: '画質情報を待っています' },
+    '帧率待播放检测': { en: 'Play to estimate frame rate', ja: '再生するとフレームレートを推定します' },
+    '播放估算': { en: 'playback estimate', ja: '再生時の推定値' },
+    '已复制：{name}': { en: 'Copied: {name}', ja: 'コピーしました：{name}' },
+    '未找到 Source 下载链接，请先展开网站下载菜单后重试': { en: 'Source link unavailable. Open the site’s download menu and try again.', ja: '元画質のリンクがありません。サイトのダウンロードメニューを開いて再試行してください。' },
+    '已请求下载原画（文件保存由浏览器处理）': { en: 'Source download requested. Your browser handles saving.', ja: '元画質のダウンロードを開始しました。保存はブラウザーで行います。' },
+    '已复制：{name}；已请求下载；喜欢/关注仅对可识别的未选中按钮发出操作，请以网站结果为准': { en: 'Copied: {name}. Download requested. Like and follow were requested for recognized inactive buttons. Check their status on the site.', ja: 'コピーしました：{name}。ダウンロードを要求しました。未選択と判別できた場合のみ、いいね・フォローを要求しました。結果はサイトで確認してください。' },
+    '未找到封面地址': { en: 'Cover image URL unavailable', ja: 'カバー画像のURLが見つかりません' },
+    '上传日期暂不可用，作者命名和影院功能仍可使用': { en: 'Upload date unavailable. Author-based filenames and theatre mode are still available.', ja: '投稿日を取得できません。投稿者名を使ったファイル名とシアターモードは利用できます。' },
+  };
+  function siteLanguage() {
+    let selected;
+    try { selected = localStorage.getItem('locale'); } catch { /* Storage may be disabled. */ }
+    const lang = (selected || document.documentElement?.lang || navigator.language || 'en').toLowerCase().split('-')[0];
+    return ['zh', 'ja'].includes(lang) ? lang : 'en';
+  }
+  let language = siteLanguage();
+  function translate(key, name = '') {
+    const text = translations[key]?.[language] || key;
+    return text.replace('{name}', () => name);
+  }
+  function localize(node, property, key) {
+    node[property] = translate(key);
+    node.dataset['iwp' + property[0].toUpperCase() + property.slice(1)] = key;
+  }
+  const settings = { type: 'name', theatre: true, source: true, autoplay: false, ...load('iwp-settings', {}) };
   // Preserve Theatre's preference when no preference has been saved here yet.
   try {
     if (!load('iwp-settings', null) && localStorage.getItem('player-theatre') !== null) settings.theatre = true;
@@ -87,7 +134,19 @@
     .iwp-theatre .videoPlayer {width:100%;min-width:0}
     .iwp-theatre .video-js {width:100%!important;height:min(78vh,56.25cqw)!important;min-height:0!important}
     .iwp-theatre video {object-fit:contain}
-    .iwp-theatre-toggle {cursor:pointer}
+    .page-video__player, .page-video__player .video-js {-webkit-user-select:none;user-select:none}
+    .video-js .iwp-autoplay,.video-js .iwp-theatre-toggle {display:grid;place-items:center;padding:0;cursor:pointer}
+    .video-js .iwp-autoplay {width:40px}
+    .iwp-autoplay .iwp-switch-track {display:block;width:34px;height:18px;fill:#535961;stroke:#70767b}
+    .iwp-autoplay[aria-pressed="true"] .iwp-switch-track {fill:#81cba6;stroke:#a1ddbe}
+    body.dark .iwp-autoplay[aria-pressed="true"] .iwp-switch-track {fill:#80b9f5;stroke:#afd5ff}
+    body.dark .iwp-play-mark {fill:#163b62}
+    .iwp-switch-thumb {transition:transform .15s}
+    .iwp-autoplay[aria-pressed="true"] .iwp-switch-thumb {transform:translateX(16px)}
+    .iwp-autoplay[aria-pressed="false"] .iwp-play-mark,.iwp-autoplay[aria-pressed="true"] .iwp-pause-mark {display:none}
+    .iwp-autoplay:focus-visible {outline:2px solid currentColor;outline-offset:-2px}
+    .iwp-theatre-toggle svg {display:block;width:21px;height:21px}
+    @media(prefers-reduced-motion:reduce){.iwp-switch-thumb{transition:none}}
   `;
 
   let current = null;
@@ -95,30 +154,84 @@
   let suspended = false;
   const videoId = () => location.pathname.match(/^\/video\/([^/]+)/)?.[1] || null;
   let playbackId;
-  let manualPlayback = false;
+  let blockStartup;
+  let startupVideo;
+  let surfaceClick;
+  function cancelSurfaceClick() {
+    clearTimeout(surfaceClick);
+    surfaceClick = null;
+  }
   function syncPlaybackRoute() {
     const id = videoId();
     if (id !== playbackId) {
       playbackId = id;
-      manualPlayback = false;
+      cancelSurfaceClick();
+      blockStartup = !settings.autoplay;
+      startupVideo = null;
     }
     return id;
   }
-  function recordPlayIntent(event) {
+  // Only release the startup guard if the site's keyboard handler actually starts media.
+  function observeNativePlayback(event) {
+    if (!event.isTrusted || !syncPlaybackRoute() || !blockStartup) return;
+    const video = $('.page-video__player video');
+    if (video && !video.paused) blockStartup = false;
+  }
+  for (const type of ['keydown', 'keyup']) window.addEventListener(type, observeNativePlayback);
+  function handlePlayerInput(event) {
     if (!event.isTrusted || !syncPlaybackRoute()) return;
     const target = event.target;
     const player = target.closest?.('.page-video__player');
     if (!player) return;
-    const playControl = target.closest('video, .vjs-big-play-button, .vjs-play-control, .vjs-poster');
-    if (event.type === 'keydown') {
-      if (event.repeat || ![' ', 'Enter', 'k', 'K'].includes(event.key)) return;
-      if (!playControl && !target.matches('.video-js, .page-video__player')) return;
-    } else if (event.button !== 0 || !playControl) return;
-    manualPlayback = true;
+    const playControl = target.closest('.vjs-big-play-button, .vjs-play-control');
+    if (event.button !== 0) return;
+    if (playControl && (event.detail === 0 || playControl.matches('.vjs-play-control'))) {
+      cancelSurfaceClick();
+      blockStartup = false;
+      return;
+    }
+    if (target.closest('.vjs-control-bar, .vjs-menu, .vjs-modal-dialog, a, input, select') ||
+        (!playControl && target.closest('button, [role="button"], [role="slider"]'))) return;
+    const video = $('video', player);
+    if (!video || video.controls || !(target === player || target.closest('.video-js, .videoPlayer, video'))) return;
+    // Selection starts on the second press, before the dblclick event.
+    if (event.type === 'mousedown') {
+      if (event.detail > 1) event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    cancelSurfaceClick();
+    if (event.type === 'dblclick') {
+      const fullscreen = $('.vjs-fullscreen-control', player);
+      if (fullscreen) fullscreen.click();
+      else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else player.requestFullscreen?.().catch(() => {});
+      return;
+    }
+    // A spinner or poster click is consumed here, so Video.js never receives
+    // its usual opportunity to take keyboard focus. Focus during the gesture
+    // so a later buffering callback cannot steal focus from another field.
+    const keyboardTarget = video.closest('.video-js') || video;
+    if (!keyboardTarget.hasAttribute('tabindex')) keyboardTarget.tabIndex = -1;
+    keyboardTarget.focus({ preventScroll: true });
+    // Give a second click time to claim the gesture before toggling playback.
+    const id = playbackId;
+    surfaceClick = setTimeout(() => {
+      surfaceClick = null;
+      if (id !== videoId() || !player.isConnected) return;
+      const media = $('video', player);
+      if (!media) return;
+      blockStartup = false;
+      const control = $('.vjs-play-control', player);
+      if (control) control.click();
+      else if (media.paused) media.play().catch(() => {});
+      else media.pause();
+    }, 500);
   }
-  for (const type of ['pointerdown', 'click', 'keydown']) document.addEventListener(type, recordPlayIntent, true);
+  for (const type of ['mousedown', 'click', 'dblclick']) document.addEventListener(type, handlePlayerInput, true);
   function holdPlayback(video) {
-    if (!syncPlaybackRoute() || manualPlayback) return;
+    if (!syncPlaybackRoute() || !blockStartup) return;
     video.removeAttribute('autoplay');
     if (!video.paused) video.pause();
   }
@@ -129,8 +242,13 @@
   }
   const element = (tag, text, attributes = {}) => {
     const node = document.createElement(tag);
-    if (text) node.textContent = text;
-    for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+    if (text && Object.hasOwn(translations, text)) localize(node, 'textContent', text);
+    else if (text) node.textContent = text;
+    for (const [key, value] of Object.entries(attributes)) {
+      if (key === 'aria-label' && Object.hasOwn(translations, value)) localize(node, 'ariaLabel', value);
+      else if (key === 'title' && Object.hasOwn(translations, value)) localize(node, 'title', value);
+      else node.setAttribute(key, value);
+    }
     return node;
   };
   const sanitize = text => text.replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '');
@@ -153,13 +271,16 @@
       let text;
       let disabled = false;
       try { text = filename(ctx, option.value); }
-      catch (error) { text = error.message; disabled = true; }
+      catch (error) { text = translate(error.message); disabled = true; }
       if (option.textContent !== text) option.textContent = text;
       if (option.disabled !== disabled) option.disabled = disabled;
     }
   }
-  function report(ctx, message) {
-    if (ctx === current && ctx.status.textContent !== message) ctx.status.textContent = message;
+  function report(ctx, key, name) {
+    if (ctx !== current) return;
+    ctx.lastReport = [key, name];
+    const message = translate(key, name);
+    if (ctx.status.textContent !== message) ctx.status.textContent = message;
   }
   function button(ctx, text, action) {
     const node = element('button', '', { type: 'button', class: 'button button--primary button--solid' });
@@ -184,6 +305,8 @@
     ctx.anchor = null;
   }
   function theatre(ctx) {
+    const focused = document.activeElement;
+    const restoreFocus = focused && ctx.player.contains(focused);
     if (settings.theatre) {
       const main = ctx.player.closest('.container-fluid');
       if (main?.parentNode && !ctx.anchor) {
@@ -199,8 +322,9 @@
       }
       ctx.player.classList.add('iwp-theatre');
     } else restore(ctx);
+    if (restoreFocus && focused.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
     ctx.control?.setAttribute('aria-pressed', String(settings.theatre));
-    if (ctx.control) ctx.control.title = settings.theatre ? '退出影院模式' : '进入影院模式';
+    if (ctx.control) localize(ctx.control, 'title', settings.theatre ? '退出影院模式' : '进入影院模式');
   }
   function toggle(ctx) {
     settings.theatre = !settings.theatre;
@@ -216,7 +340,7 @@
     return all('button', root).find(b => {
       if (b.disabled || b.getAttribute('aria-pressed') === 'true') return false;
       if ($('.fa-heart-crack, .fa-user-check', b)) return false;
-      return kind === 'like' ? Boolean($('.fa-heart', b)) : Boolean($('.fa-check, .fa-user-plus, .fa-heart', b)) && !/unfollow|取消关注|已关注/i.test(b.textContent);
+      return kind === 'like' ? Boolean($('.fa-heart', b)) : Boolean($('.fa-check, .fa-user-plus, .fa-heart', b)) && !/unfollow|取消关注|已关注|フォロー解除|フォロー中/i.test(b.textContent);
     });
   }
   function attachVideo(ctx, video) {
@@ -228,7 +352,7 @@
     let fps = null;
     const update = () => {
       const w = video.videoWidth, h = video.videoHeight;
-      const value = w && h ? `${w} × ${h}${fps ? ` · ≈${fps} fps（播放估算）` : ' · 帧率待播放检测'}` : '等待视频画质信息';
+      const value = w && h ? `${w} × ${h}${fps ? ` · ≈${fps} fps (${translate('播放估算')})` : ` · ${translate('帧率待播放检测')}`}` : translate('等待视频画质信息');
       if (ctx.quality.textContent !== value) ctx.quality.textContent = value;
       const low = String(Boolean(w && h && (Math.max(w, h) < 1920 || Math.min(w, h) < 1080)) || Boolean(fps && fps < 59));
       if (ctx.quality.dataset.low !== low) ctx.quality.dataset.low = low;
@@ -248,6 +372,7 @@
       previous = meta;
       handle = video.requestVideoFrameCallback(frame);
     };
+    ctx.updateQuality = update;
     video.addEventListener('loadedmetadata', reset);
     video.addEventListener('seeking', reset);
     video.addEventListener('ratechange', reset);
@@ -292,10 +417,42 @@
     const bar = $('.vjs-control-bar', ctx.player);
     if (bar && !ctx.control?.isConnected) {
       ctx.control = element('button', '', { type: 'button', class: 'vjs-control vjs-button iwp-theatre-toggle', title: settings.theatre ? '退出影院模式' : '进入影院模式', 'aria-label': '切换影院模式', 'aria-pressed': String(settings.theatre) });
-      ctx.control.append(element('span', '', { class: 'vjs-icon-placeholder vjs-icon-square', 'aria-hidden': 'true' }), element('span', '影院模式', { class: 'vjs-control-text' }));
+      ctx.control.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
       ctx.control.addEventListener('click', () => toggle(ctx));
-      const fullscreen = $('.vjs-fullscreen-control', bar);
-      bar.insertBefore(ctx.control, fullscreen?.parentNode === bar ? fullscreen : null);
+    }
+    if (bar && !ctx.autoplayControl?.isConnected) {
+      const button = element('button', '', { type: 'button', class: 'vjs-control vjs-button iwp-autoplay', 'aria-label': '自动播放' });
+      button.innerHTML = `<svg class="iwp-switch-track" viewBox="0 0 34 18" aria-hidden="true">
+        <rect x=".5" y=".5" width="33" height="17" rx="8.5"/>
+        <g class="iwp-switch-thumb" stroke="none">
+          <circle cx="9" cy="9" r="7" fill="#fafbfc"/>
+          <path class="iwp-pause-mark" fill="#3c4149" d="M6 6h2v6H6z M10 6h2v6h-2z"/>
+          <path class="iwp-play-mark" fill="#184932" d="M7 5.5l6 3.5-6 3.5z"/>
+        </g></svg>`;
+      const refresh = () => {
+        button.setAttribute('aria-pressed', String(settings.autoplay));
+        localize(button, 'title', settings.autoplay ? '自动播放：开启' : '自动播放：关闭');
+      };
+      button.addEventListener('click', () => {
+        settings.autoplay = !settings.autoplay;
+        save();
+        refresh();
+      });
+      ctx.autoplayControl = button;
+      refresh();
+    }
+    if (bar) {
+      // Video.js plugins may wrap controls or insert them after the bar mounts.
+      const slot = selector => $(`:scope > :is(${selector}), :scope > :has(${selector})`, bar);
+      const fullscreen = slot('.vjs-fullscreen-control');
+      if (ctx.control.parentNode !== bar || ctx.control.nextElementSibling !== fullscreen)
+        bar.insertBefore(ctx.control, fullscreen);
+      const pip = slot('.vjs-picture-in-picture-control');
+      const time = pip ? null : slot('.vjs-remaining-time') || slot('.vjs-duration') || slot('.vjs-current-time');
+      const anchor = pip || (time ? time.nextElementSibling : ctx.control);
+      if (anchor !== ctx.autoplayControl &&
+          (ctx.autoplayControl.parentNode !== bar || ctx.autoplayControl.nextElementSibling !== anchor))
+        bar.insertBefore(ctx.autoplayControl, anchor);
     }
     const source = $('.vjs-menu-item.resolution-Source', ctx.player);
     if (settings.source && source && ctx.sourceItem !== source) {
@@ -324,10 +481,29 @@
     }
     old.toolbar.remove();
     old.control?.remove();
+    old.autoplayControl?.remove();
   }
   function mount(id, player, details) {
     const ctx = { id, player, details, nativeActions: new Map(), nativeStats: new Map(), abort: new AbortController() };
     current = ctx;
+    player.addEventListener('keydown', event => {
+      if (event.defaultPrevented || event.repeat || event.isComposing || event.ctrlKey ||
+          event.altKey || event.metaKey || event.shiftKey || ctx.id !== videoId()) return;
+      const target = event.target;
+      if (target !== document.activeElement || target.isContentEditable ||
+          !target.matches('.video-js, video')) return;
+      const key = event.key.toLowerCase();
+      if (key === 't') {
+        event.preventDefault();
+        toggle(ctx);
+      } else if (key === 'i') {
+        const pip = $('.vjs-picture-in-picture-control', player);
+        if (pip && !pip.disabled) {
+          event.preventDefault();
+          pip.click();
+        }
+      }
+    }, { signal: ctx.abort.signal });
     ctx.toolbar = element('div', '', { id: 'iwp-toolbar', role: 'group', 'aria-label': 'Iwara Plus' });
     details.before(ctx.toolbar);
     ctx.reveal = element('div', '', { id: 'iwp-reveal', 'data-expanded': 'false' });
@@ -352,8 +528,8 @@
       ctx.extras.setAttribute('aria-hidden', String(!expanded));
       expand.setAttribute('aria-expanded', String(expanded));
       const label = expanded ? '收起增强功能' : '展开增强功能';
-      expand.setAttribute('aria-label', label);
-      expand.title = label;
+      localize(expand, 'ariaLabel', label);
+      localize(expand, 'title', label);
     });
     collapseRow.append(expand);
     ctx.toolbar.append(ctx.reveal, collapseRow);
@@ -369,7 +545,7 @@
       GM_setClipboard(name, 'text');
       return name;
     };
-    button(ctx, '复制名字', () => report(ctx, `已复制：${copy()}`));
+    button(ctx, '复制名字', () => report(ctx, '已复制：{name}', copy()));
     button(ctx, '下载原画', () => {
       const link = downloadLink();
       if (!link) throw new Error('未找到 Source 下载链接，请先展开网站下载菜单后重试');
@@ -382,7 +558,7 @@
       const liked = positiveButton($('.page-video__actions'), 'like');
       const followed = positiveButton($('.page-video__byline__actions'), 'follow');
       liked?.click(); followed?.click(); link.click();
-      report(ctx, `已复制：${name}；已请求下载；喜欢/关注仅对可识别的未选中按钮发出操作，请以网站结果为准`);
+      report(ctx, '已复制：{name}；已请求下载；喜欢/关注仅对可识别的未选中按钮发出操作，请以网站结果为准', name);
     });
     button(ctx, '打开封面', () => {
       const video = $('video', ctx.player);
@@ -392,7 +568,8 @@
       if (!url || !/^https?:/.test(url)) throw new Error('未找到封面地址');
       window.open(url, '_blank', 'noopener');
     });
-    const label = element('label', '自动原画');
+    const label = element('label');
+    label.append(element('span', '自动原画'));
     const checkbox = element('input', '', { type: 'checkbox' });
     checkbox.checked = settings.source;
     checkbox.addEventListener('change', () => { settings.source = checkbox.checked; ctx.sourceItem = null; save(); enhance(ctx); });
@@ -413,12 +590,29 @@
     queued = false;
     if (suspended) return;
     if (document.head && !style.isConnected) document.head.append(style);
+    const nextLanguage = siteLanguage();
+    if (language !== nextLanguage) {
+      language = nextLanguage;
+      if (current) {
+        for (const node of all('[data-iwp-text-content], [data-iwp-title], [data-iwp-aria-label]')) {
+          for (const property of ['textContent', 'title', 'ariaLabel']) {
+            const key = node.dataset['iwp' + property[0].toUpperCase() + property.slice(1)];
+            if (key) node[property] = translate(key);
+          }
+        }
+        if (current.lastReport) report(current, ...current.lastReport);
+        current.updateQuality?.();
+      }
+    }
     const id = syncPlaybackRoute();
     const player = $('.page-video__player');
     const details = $('.page-video__details');
     if (current && (current.id !== id || current.details !== details || !current.player.isConnected || !current.toolbar.isConnected || (player && player !== current.player))) dispose();
     const video = player && $('video', player);
-    if (id && video) holdPlayback(video);
+    if (id && video && (startupVideo !== video || (video.autoplay && blockStartup))) {
+      startupVideo = video;
+      holdPlayback(video);
+    }
     if (id && player && details) {
       if (!current) mount(id, player, details);
       else enhance(current);
@@ -428,7 +622,7 @@
     if (!suspended && !queued) { queued = true; queueMicrotask(sync); }
   }
   const observer = new MutationObserver(schedule);
-  const observeOptions = { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['title', 'autoplay'] };
+  const observeOptions = { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['title', 'autoplay', 'lang'] };
   observer.observe(document, observeOptions);
   window.addEventListener('popstate', schedule);
   window.addEventListener('urlchange', schedule);
@@ -436,6 +630,7 @@
   let routeTimer = setInterval(schedule, 750);
   window.addEventListener('pagehide', () => {
     suspended = true;
+    cancelSurfaceClick();
     playbackId = null;
     observer.disconnect();
     clearInterval(routeTimer);

@@ -10,6 +10,7 @@ const markup = `<div class="content"><div class="container-fluid"><div class="co
 async function setup({ fail = false, saved, deferred = false } = {}) {
   const dom = new JSDOM(markup, { url: 'https://www.iwara.tv/video/first/title', runScripts: 'outside-only' });
   const w = dom.window;
+  w.localStorage.setItem('locale', 'zh');
   w.document.querySelector('h1').textContent = '<title>: test?';
   const counts = { source: 0, download: 0, like: 0, follow: 0 };
   w.document.querySelector('.resolution-Source').onclick = () => counts.source++;
@@ -55,10 +56,11 @@ test('theatre restores exact player position and has one accessible control', as
     assert.equal(w.document.querySelectorAll('.iwp-theatre-toggle').length, 1);
     const control = w.document.querySelector('.iwp-theatre-toggle');
     assert.equal(control.parentNode.className, 'vjs-control-bar');
-    assert.equal(control.previousElementSibling.className, 'vjs-progress-control');
+    assert.equal(control.previousElementSibling.getAttribute('aria-label'), '自动播放');
+    assert.equal(control.previousElementSibling.previousElementSibling.className, 'vjs-progress-control');
     assert.equal(control.nextElementSibling.className, 'vjs-fullscreen-control');
     assert.equal(w.document.querySelector('#iwp-toolbar .iwp-theatre-toggle'), null);
-    assert.ok(control.querySelector('.vjs-icon-square'));
+    assert.ok(control.querySelector('svg rect'));
     await click('退出影院');
     assert.equal(player.parentNode, parent);
     assert.equal(player.nextElementSibling.id, 'iwp-toolbar');

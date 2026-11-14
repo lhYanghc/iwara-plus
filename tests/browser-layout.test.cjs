@@ -65,6 +65,158 @@ test('browser: holds playback until user activation for each video route', async
   } finally { await browser.close(); }
 });
 
+test('browser: buffered single clicks, fullscreen double clicks and saved autoplay', async () => {
+  const browser = await chromium.launch({ channel: 'chrome', args: ['--autoplay-policy=no-user-gesture-required'] });
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      localStorage.setItem('locale', 'zh');
+      window.GM_getValue = (_, fallback) => JSON.parse(localStorage.getItem('settings')) || fallback;
+      window.GM_setValue = (_, value) => localStorage.setItem('settings', JSON.stringify(value));
+    });
+    const body = `<div class="page-video__player"><div class="video-js"><video muted></video>
+      <div class="vjs-loading-spinner">Loading</div><button class="vjs-big-play-button">Play video</button>
+      <div class="vjs-control-bar"><button class="vjs-play-control">Play/Pause</button>
+      <button class="vjs-progress-control">Seek</button><span class="vjs-remaining-time">10:39</span>
+      <button class="vjs-picture-in-picture-control">Picture in picture</button><button class="vjs-menu-button">Settings</button>
+      <button class="vjs-fullscreen-control">Fullscreen</button></div>
+      </div></div><div class="page-video__details"></div>`;
+    await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body }));
+    await page.goto('https://www.iwara.tv/video/one');
+    async function mount() {
+      await page.evaluate(() => {
+        const video = document.querySelector('video');
+        const canvas = document.createElement('canvas');
+        window.draw = () => canvas.getContext('2d').fillRect(0, 0, 10, 10);
+        video.srcObject = canvas.captureStream(10);
+        window.toggles = 0;
+        document.querySelector('.vjs-picture-in-picture-control').onclick = () => document.pictureInPictureElement ?
+          document.exitPictureInPicture() : video.requestPictureInPicture();
+        const toggle = () => {
+          window.toggles++;
+          if (video.paused) video.play().catch(() => {});
+          else video.pause();
+        };
+        for (const node of document.querySelectorAll('video, .vjs-play-control, .vjs-big-play-button')) node.onclick = toggle;
+        document.querySelector('.vjs-fullscreen-control').onclick = () => document.fullscreenElement ?
+          document.exitFullscreen() : document.querySelector('.video-js').requestFullscreen();
+      });
+      await page.addScriptTag({ content: script });
+    }
+    await mount();
+    const spinner = page.locator('.vjs-loading-spinner');
+    const bigPlay = page.locator('.vjs-big-play-button');
+    const autoplay = page.getByRole('button', { name: '自动播放' });
+    const paused = () => page.locator('video').evaluate(v => v.paused);
+    assert.equal(await autoplay.getAttribute('aria-pressed'), 'false');
+    const track = autoplay.locator('.iwp-switch-track');
+    assert.deepEqual(await track.evaluate(node => {
+      const { width, height } = node.getBoundingClientRect();
+      return [width, height, getComputedStyle(node).fill];
+    }), [34, 18, 'rgb(83, 89, 97)']);
+    assert.equal(await page.locator('.vjs-remaining-time + .iwp-autoplay + .vjs-picture-in-picture-control + .vjs-menu-button + .iwp-theatre-toggle + .vjs-fullscreen-control').count(), 1);
+    await spinner.click();
+    await page.waitForFunction(() => window.toggles === 1);
+    assert.equal(await paused(), false);
+    await spinner.click();
+    await page.waitForFunction(() => window.toggles === 2);
+    await page.evaluate(() => window.draw());
+    assert.equal(await paused(), true);
+    await bigPlay.dblclick();
+    await page.waitForFunction(() => document.fullscreenElement);
+    assert.equal(await paused(), true);
+    await spinner.click();
+    await page.waitForFunction(() => window.toggles === 3);
+    await page.evaluate(() => window.draw());
+    await page.waitForFunction(() => document.querySelector('video').readyState >= 2);
+    assert.equal(await page.evaluate(() => document.activeElement === document.querySelector('.video-js')), true);
+    await page.keyboard.press('i');
+    await page.waitForFunction(() => document.pictureInPictureElement === document.querySelector('video'));
+    await page.keyboard.press('i');
+    await page.waitForFunction(() => !document.pictureInPictureElement);
+    const theatre = page.getByRole('button', { name: '切换影院模式' });
+    const before = await theatre.getAttribute('aria-pressed');
+    await page.keyboard.press('t');
+    assert.notEqual(await theatre.getAttribute('aria-pressed'), before);
+    await page.keyboard.press('t');
+    await page.keyboard.press('Shift+t');
+    await page.locator('.vjs-progress-control').press('t');
+    assert.equal(await theatre.getAttribute('aria-pressed'), before);
+    await spinner.dblclick();
+    await page.waitForFunction(() => !document.fullscreenElement);
+    assert.equal(await page.evaluate(() => getSelection().toString()), '');
+    await autoplay.click();
+    await page.locator('.vjs-progress-control').click();
+    assert.equal(await paused(), false);
+    assert.equal(await page.evaluate(() => window.toggles), 3);
+    await page.reload();
+    await mount();
+    assert.equal(await autoplay.getAttribute('aria-pressed'), 'true');
+    assert.equal(await track.evaluate(node => getComputedStyle(node).fill), 'rgb(129, 203, 166)');
+    await page.evaluate(() => {
+      document.body.classList.add('dark');
+      localStorage.setItem('locale', 'ja');
+    });
+    const japanese = page.getByRole('button', { name: '自動再生', exact: true });
+    await japanese.waitFor();
+    assert.equal(await japanese.getAttribute('title'), '自動再生オン');
+    assert.equal(await japanese.locator('svg').evaluate(node => getComputedStyle(node).fill), 'rgb(128, 185, 245)');
+    await page.evaluate(() => localStorage.setItem('locale', 'en'));
+    await page.getByRole('button', { name: 'Autoplay', exact: true }).waitFor();
+    assert.equal(await page.locator('#iwp-expand').getAttribute('title'), 'Show enhancements');
+    await page.evaluate(() => localStorage.setItem('locale', 'zh'));
+    await autoplay.waitFor();
+    await page.evaluate(() => { document.querySelector('video').play().catch(() => {}); window.draw(); });
+    await page.waitForFunction(() => document.querySelector('video').readyState >= 2);
+    assert.equal(await paused(), false);
+    await autoplay.click();
+    assert.equal(await paused(), false);
+    await page.evaluate(() => history.pushState({}, '', '/video/two'));
+    await page.waitForFunction(() => document.querySelector('video').paused);
+  } finally { await browser.close(); }
+});
+
+test('browser: the site alone defines the player shortcuts and their focus scope', async () => {
+  const browser = await chromium.launch({ channel: 'chrome' });
+  try {
+    const page = await browser.newPage();
+    await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: fixture }));
+    await page.goto('https://www.iwara.tv/video/keys');
+    await page.evaluate(() => {
+      const root = document.querySelector('.video-js');
+      root.tabIndex = -1;
+      const video = root.querySelector('video');
+      const canvas = document.createElement('canvas');
+      video.srcObject = canvas.captureStream(10);
+      window.draw = () => canvas.getContext('2d').fillRect(0, 0, 10, 10);
+      // An arbitrary site-defined binding checks that the script has no key list.
+      root.onkeydown = e => {
+        if (e.key === 'p') { video.play().catch(() => {}); window.draw(); }
+      };
+      document.body.append(document.createElement('textarea'));
+    });
+    await page.addScriptTag({ content: script });
+    assert.equal(await page.evaluate(() => document.activeElement === document.body), true);
+    await page.keyboard.press('p');
+    const root = page.locator('.video-js');
+    const video = root.locator('video');
+    await root.press('k');
+    await root.press('Space');
+    assert.equal(await video.evaluate(v => v.paused), true);
+    // Unmapped keys must not unlock subsequent autoplay.
+    assert.equal(await video.evaluate(async v => {
+      const attempt = new Promise(resolve => v.addEventListener('play', resolve, { once: true }));
+      v.play().catch(() => {});
+      await attempt;
+      return v.paused;
+    }), true);
+    await root.press('p');
+    await page.waitForFunction(() => !document.querySelector('video').paused && document.querySelector('video').readyState >= 2);
+    await page.locator('textarea').fill('kmf');
+    assert.equal(await page.locator('textarea').inputValue(), 'kmf');
+  } finally { await browser.close(); }
+});
+
 test('browser: menu widths, reversible roll animation, and light/dark themes', async () => {
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   try {

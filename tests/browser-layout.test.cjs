@@ -27,6 +27,266 @@ body.menu-open .content{padding-left:260px}.container-fluid{display:flex;width:1
 <div class="stats"><div class="stats__number"><i class="fa-heart"></i>428</div><div class="stats__number"><i class="fa-eye"></i>6,744</div></div></div></div>
 <aside class="col-md-3 page-video__sidebar">原始侧栏</aside></div></div></section></body></html>`;
 
+test('browser: playlist controls cross page boundaries and reveal a collapsed queue at the right edge', async () => {
+  const browser = await chromium.launch({ channel: 'chrome' });
+  try {
+    const page = await browser.newPage({ deviceScaleFactor: 1.25 });
+    await page.addInitScript({ content: script });
+    const requested = [];
+    const ids = ['one','two','three','four','five'];
+    const createdAt = id => '2026-11-0' + (5 - ids.indexOf(id)) + 'T12:00:00Z';
+    await page.route('**/*', route => {
+      const url = new URL(route.request().url());
+      if (url.hostname !== 'api.iwara.tv') {
+        const nativeRow = '<div class="playlist__item"><div class="playlist__item__info"><div class="text text--text text--bold">one</div><div class="username"><div class="text text--small">Author</div></div></div></div>';
+        const html = fixture
+          .replace('</style>', '.page-video__player{display:flex}.page-video__player>.playlist{flex:0 0 25%;min-width:0}.page-video__player>.videoPlayer{flex:1}.videoPlayer__bg{position:absolute;inset:0;z-index:10}.vjs-control-bar{position:relative;z-index:12}.playlist a{color:blue}.light .text--text{color:#222}.dark .text--text{color:#eee}.username .text--small{color:#888}</style>')
+          .replace('<div class="videoPlayer">', '<div class="videoPlayer"><div class="videoPlayer__bg"></div>')
+          .replace('</div>\n<div class="page-video__details">', '<div class="playlist"><div class="playlist__header"><div class="playlist__header__about"><div class="text text--small">5 个视频</div></div></div><div class="playlist__items">' + nativeRow + '</div></div></div>\n<div class="page-video__details">');
+        return route.fulfill({ contentType: 'text/html; charset=utf-8', body: html });
+      }
+      const number = Number(url.searchParams.get('page'));
+      if (url.pathname.startsWith('/video/')) return route.fulfill({ json: { createdAt: createdAt(url.pathname.split('/').pop()) } });
+      requested.push(number);
+      const id = ids[number];
+      const pageIds = number === 2 && requested.length === 3 ? ['two', id] : [id];
+      return route.fulfill({ json: { page: number, limit: 1, count: ids.length,
+        results: pageIds.map(id => ({ id, title: id, user: { name: 'Author' }, createdAt: createdAt(id) })) } });
+    });
+    await page.goto('https://www.iwara.tv/video/one?playlist=list');
+    const links = page.locator('.iwp-queue-nav a');
+    await page.locator('.iwp-queue-nav a[href]').waitFor();
+    assert.equal(await links.first().getAttribute('href'), null);
+    const position = page.locator('.iwp-queue-position');
+    await page.getByText('1/5 个视频', { exact: true }).waitFor();
+    assert.equal(await page.getByText('5 个视频', { exact: true }).isVisible(), false);
+    assert.deepEqual(requested, [0, 1]);
+    const list = page.locator('.playlist__items');
+    for (const id of ids.slice(1)) {
+      await list.dispatchEvent('scroll');
+      await list.getByRole('link', { name: id }).waitFor();
+    }
+    assert.deepEqual(requested, [0, 1, 2, 3, 4]);
+    assert.equal(await list.getByRole('link', { name: 'two Author' }).count(), 1);
+    await list.evaluate(node => {
+      node.style.cssText = 'height:40px;overflow-y:auto';
+      node.scrollTop = node.scrollHeight;
+    });
+    for (let i = 0; i < 4; i++) await list.dispatchEvent('wheel', { deltaY: 120 });
+    assert.deepEqual(requested, [0, 1, 2, 3, 4]);
+    await list.hover();
+    const refreshed = page.waitForEvent('console', msg => /up to date|列表已是最新/.test(msg.text()));
+    await page.mouse.wheel(0, -800);
+    await refreshed;
+    assert.equal(await page.getByText(/up to date|列表已是最新/).count(), 0);
+    assert.deepEqual(requested, [0, 1, 2, 3, 4, 0]);
+    await list.evaluate(node => node.removeAttribute('style'));
+    for (const theme of ['light', 'dark']) {
+      const colors = await list.evaluate((node, theme) => {
+        document.body.className = theme;
+        return [...node.querySelectorAll('.playlist__item__info')].map(info =>
+          [info.firstElementChild, info.lastElementChild.firstElementChild].map(el => getComputedStyle(el).color));
+      }, theme);
+      assert.deepEqual(colors[0], colors[1]);
+    }
+    const toggle = page.locator('.iwp-queue-toggle');
+    for (const theatre of [false, true, false]) {
+      if (theatre !== ((await page.locator('.iwp-theatre').count()) > 0)) await page.locator('.iwp-theatre-toggle').click();
+      for (const [width, zoom, share] of [[1001, 1.25, 29.5], [1537, 0.9, 24.25], [1280, 1, 25]]) {
+        await page.setViewportSize({ width, height: 720 });
+        await page.evaluate(([zoom, share]) => {
+          document.body.style.zoom = zoom;
+          document.querySelector('.playlist').style.flexBasis = share + '%';
+        }, [zoom, share]);
+        const gap = await toggle.evaluate(button =>
+          document.querySelector('.playlist').getBoundingClientRect().left - button.getBoundingClientRect().right);
+        assert.ok(Math.abs(gap) < 0.05, 'sidebar gap at width ' + width + ', zoom ' + zoom + ': ' + gap);
+        await toggle.click();
+        const collapsedGap = await toggle.evaluate(button =>
+          document.querySelector('.videoPlayer').getBoundingClientRect().right - button.getBoundingClientRect().right);
+        assert.ok(Math.abs(collapsedGap) < 0.05, 'collapsed gap at width ' + width + ': ' + collapsedGap);
+        await toggle.click();
+      }
+    }
+    const edge = await toggle.boundingBox();
+    await page.mouse.move(edge.x + 8, edge.y + 16);
+    assert.equal(await toggle.evaluate(node => {
+      const box = node.getBoundingClientRect();
+      return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+    }), true);
+    await toggle.click();
+    await page.mouse.move(0, 0);
+    assert.equal(await page.locator('.playlist').isVisible(), false);
+    assert.equal(await toggle.evaluate(node => getComputedStyle(node).opacity), '1');
+    await page.locator('video').evaluate(video => {
+      const canvas = document.createElement('canvas');
+      video.muted = true;
+      video.srcObject = canvas.captureStream(10);
+      canvas.getContext('2d').fillRect(0, 0, 10, 10);
+      const play = document.createElement('button');
+      play.className = 'vjs-play-control';
+      play.textContent = 'Play';
+      play.onclick = () => video.paused ? video.play() : video.pause();
+      document.querySelector('.vjs-control-bar').prepend(play);
+    });
+    const waitForOpacity = opacity => page.waitForFunction(value =>
+      getComputedStyle(document.querySelector('.iwp-queue-toggle')).opacity === value, opacity);
+    for (const theatre of [false, true]) {
+      if (theatre !== ((await page.locator('.iwp-theatre').count()) > 0)) await page.locator('.iwp-theatre-toggle').click();
+      await page.locator('.vjs-play-control').click();
+      await page.waitForFunction(() => !document.querySelector('video').paused && document.querySelector('video').readyState >= 2);
+      await waitForOpacity('0');
+      const box = await toggle.boundingBox();
+      await page.mouse.move(box.x + 16, box.y + 32);
+      await waitForOpacity('1');
+      await page.waitForFunction(() => {
+        const opacity = Number(getComputedStyle(document.querySelector('.iwp-queue-toggle')).opacity);
+        return opacity > 0 && opacity < 0.8;
+      });
+      await page.mouse.move(box.x + 15, box.y + 31);
+      await waitForOpacity('1');
+      await waitForOpacity('0');
+      await page.mouse.move(box.x + 18, box.y + 30);
+      await waitForOpacity('1');
+      await page.mouse.move(0, 0);
+      await waitForOpacity('0');
+      await page.locator('.vjs-play-control').click();
+      await waitForOpacity('1');
+      assert.equal(await page.locator('video').evaluate(video => video.paused), true);
+    }
+    await page.locator('.video-js').evaluate(node => node.requestFullscreen());
+    await toggle.click();
+    const panel = page.locator('.playlist');
+    await page.waitForFunction(() => document.fullscreenElement?.contains(document.querySelector('.iwp-fullscreen-list')));
+    assert.equal(await panel.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      return node.contains(document.elementFromPoint(rect.left + 5, rect.top + 5));
+    }), true);
+    const side = await panel.boundingBox(), handle = await toggle.boundingBox();
+    assert.ok(Math.abs(handle.x + handle.width - side.x) < 1);
+    await toggle.click();
+    await toggle.click();
+    await page.evaluate(() => document.exitFullscreen());
+    await page.locator('.page-video__player > .playlist:visible').waitFor();
+    await toggle.click();
+    await page.locator('.iwp-queue-nav a:last-child[href]').click();
+    await page.waitForURL('**/video/two?playlist=list');
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
+    await page.locator('.iwp-queue-nav a:last-child[href]').click();
+    await page.waitForURL('**/video/three?playlist=list');
+    await page.locator('.iwp-queue-nav a:last-child[href]').click();
+    await page.waitForURL('**/video/four?playlist=list');
+    await page.locator('.iwp-queue-nav a:last-child[href]').click();
+    await page.waitForURL('**/video/five?playlist=list');
+    await page.locator('.iwp-queue-nav a[href]').waitFor();
+    assert.equal(await position.textContent(), '5/5 个视频');
+    assert.equal(await links.last().getAttribute('href'), null);
+    await links.first().click();
+    await page.waitForURL('**/video/four?playlist=list');
+    await toggle.focus();
+    await toggle.press('Enter');
+    assert.equal(await page.locator('.playlist').isVisible(), true);
+    ids[0] = 'new';
+    const beforeRefresh = requested.filter(n => n === 0).length;
+    await list.dispatchEvent('wheel', { deltaY: -120 });
+    await list.getByRole('link', { name: 'new Author' }).waitFor();
+    assert.equal(await list.locator('.playlist__item:visible').count(), 1);
+    await list.dispatchEvent('wheel', { deltaY: -120 });
+    assert.equal(requested.filter(n => n === 0).length, beforeRefresh + 1);
+    await list.dispatchEvent('wheel', { deltaY: 120 });
+    await list.getByRole('link', { name: 'two Author' }).waitFor();
+    const mode = page.locator('.iwp-order');
+    const initialModeLabel = await mode.getAttribute('title');
+    await mode.click();
+    await page.waitForFunction(() => document.querySelector('.iwp-queue-nav a:last-child')?.pathname === '/video/three');
+    for (const [i, id] of [...ids].reverse().entries()) {
+      if (i) await list.dispatchEvent('wheel', { deltaY: 120 });
+      await list.getByRole('link', { name: id + ' Author' }).waitFor();
+    }
+    const titles = list.locator('.playlist__item:visible .playlist__item__info > :first-child');
+    assert.deepEqual(await titles.allTextContents(), [...ids].reverse());
+    ids[4] = 'last';
+    await list.dispatchEvent('wheel', { deltaY: -120 });
+    await list.getByRole('link', { name: 'last Author' }).waitFor();
+    assert.deepEqual(await titles.allTextContents(), ['last']);
+    await page.evaluate(() => sessionStorage.setItem('iwp-order:list:shuffle', '[3,4,2,0,1]'));
+    await mode.click();
+    await list.getByRole('link', { name: 'new Author' }).waitFor();
+    const next = page.locator('.iwp-queue-nav button:last-child:enabled');
+    await page.reload();
+    await next.waitFor();
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('iwp-order:list:shuffle')), null);
+    await page.evaluate(() => { Math.random = () => 0; });
+    await next.click();
+    await page.waitForURL('**/video/new?playlist=list');
+    await next.waitFor();
+    await page.evaluate(() => { Math.random = () => 0.99; });
+    await page.locator('video').dispatchEvent('ended');
+    await page.waitForURL('**/video/last?playlist=list');
+    await next.waitFor();
+    await page.evaluate(() => { Math.random = () => 0.99; });
+    await page.locator('.iwp-queue-nav button:first-child').click();
+    await page.waitForURL('**/video/four?playlist=list');
+    await mode.click();
+    assert.equal(await mode.getAttribute('title'), initialModeLabel);
+  } finally { await browser.close(); }
+});
+test('wrapped details leave space between the player and the first action button', async () => {
+  const browser = await chromium.launch({ channel: 'chrome' });
+  try {
+    const page = await browser.newPage();
+    const html = fixture.replace('<div class="page-video__details">', '<section><div class="page-video__details">')
+      .replace('</div></div></div>\n<aside', '</div></div></section></div>\n<aside');
+    await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: html }));
+    await page.addInitScript({ content: script });
+    await page.goto('https://www.iwara.tv/video/one?playlist=list');
+    const button = page.locator('#iwp-toolbar .likeButton');
+    await button.waitFor();
+    for (const width of [1280, 640]) {
+      await page.setViewportSize({ width, height: 720 });
+      for (let i = 0; i < 2; i++) {
+        const gap = await button.evaluate(node => node.getBoundingClientRect().top -
+          document.querySelector('.page-video__player').getBoundingClientRect().bottom);
+        assert.ok(gap >= 8, 'player-to-button gap was ' + gap + 'px');
+        await page.locator('.iwp-theatre-toggle').click();
+      }
+    }
+  } finally { await browser.close(); }
+});
+test('theatre anchors the control bar and centers the video in a tall playlist window', async () => {
+  const browser = await chromium.launch({ channel: 'chrome' });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const html = `<style>
+      .page-video__player,.videoPlayer {display:flex}.videoPlayer {align-items:center;position:relative}
+      .videoPlayer > div {width:100%;height:100%}.playlist {width:25%;height:100%;overflow:auto}
+      .video-js {position:relative}.vjs-tech {position:relative;max-height:80vh}
+      .vjs-control-bar {position:absolute;bottom:0;width:100%;height:30px}
+    </style><div class="container-fluid"><div class="page-video__player"><div class="videoPlayer"><div>
+      <div class="video-js"><video class="vjs-tech"></video><div class="vjs-control-bar"></div></div>
+    </div></div><div class="playlist"></div></div><div class="page-video__details"></div></div>`;
+    await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: html }));
+    await page.addInitScript({ content: script });
+    await page.goto('https://www.iwara.tv/video/one?playlist=list');
+    const toggle = page.locator('.iwp-queue-toggle');
+    await toggle.waitFor();
+    for (const width of [1440, 1920]) {
+      await page.setViewportSize({ width, height: 1000 });
+      for (let state = 0; state < 2; state++) {
+        const offsets = await page.evaluate(() => {
+          const rect = selector => document.querySelector(selector).getBoundingClientRect();
+          const frame = rect('.videoPlayer'), video = rect('video'), bar = rect('.vjs-control-bar');
+          return [frame.bottom - bar.bottom, frame.top - video.top, frame.bottom - video.bottom,
+            frame.left - video.left, frame.right - video.right, getComputedStyle(document.querySelector('video')).objectFit];
+        });
+        assert.deepEqual(offsets, [0, 0, 0, 0, 0, 'contain']);
+        const rect = await toggle.boundingBox();
+        await page.mouse.move(rect.x + 10, rect.y + 12);
+        await toggle.click();
+      }
+    }
+  } finally { await browser.close(); }
+});
 test('browser: holds playback until user activation for each video route', async () => {
   const browser = await chromium.launch({ channel: 'chrome', args: ['--autoplay-policy=no-user-gesture-required'] });
   try {

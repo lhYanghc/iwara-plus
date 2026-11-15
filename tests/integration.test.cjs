@@ -7,8 +7,8 @@ const markup = `<div class="content"><div class="container-fluid"><div class="co
 <div class="page-video__player"><video></video><div class="vjs-control-bar"><div class="vjs-progress-control"></div><button class="vjs-fullscreen-control"></button></div><li class="vjs-menu-item resolution-Source"></li></div>
 <div class="page-video__details"><h1 class="text--h1"></h1><div class="page-video__byline"><span class="username" title="Alice"></span></div><div class="page-video__byline__actions"><button id="follow"><i class="fa-check"></i></button></div><div class="page-video__actions"><button id="like"><i class="fa-heart"></i></button></div><div class="stats"><div class="stats__number"><i class="fa-heart"></i><span id="likes-count">428</span></div><div class="stats__number"><i class="fa-eye"></i>6,744</div></div><a href="https://files.iwara.tv/example.mp4">Source</a></div>
 </div></div></div>`;
-async function setup({ fail = false, saved, deferred = false } = {}) {
-  const dom = new JSDOM(markup, { url: 'https://www.iwara.tv/video/first/title', runScripts: 'outside-only' });
+async function setup({ fail = false, saved, deferred = false, url = 'https://www.iwara.tv/video/first/title' } = {}) {
+  const dom = new JSDOM(markup, { url, runScripts: 'outside-only' });
   const w = dom.window;
   w.localStorage.setItem('locale', 'zh');
   w.document.querySelector('h1').textContent = '<title>: test?';
@@ -33,6 +33,34 @@ async function setup({ fail = false, saved, deferred = false } = {}) {
   return { dom, w, counts, click };
 }
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
+test('playlist can replace the inline player after loading and switch videos in theatre', async () => {
+  const url = 'https://www.iwara.tv/video/0zzlmfjgaczazeag?playlist=8c7936af-63ac-4f8f-8e5b-b35c4717defa';
+  const { dom, w, click } = await setup({ url, saved: { theatre: true } });
+  try {
+    const doc = w.document;
+    const main = doc.querySelector('.container-fluid');
+    const column = main.querySelector('.col-12');
+    const inline = doc.querySelector('.page-video__player');
+    column.removeChild(inline);
+    const player = inline.cloneNode(true);
+    player.querySelectorAll('.iwp-autoplay,.iwp-theatre-toggle').forEach(control => control.remove());
+    const queue = doc.createElement('div');
+    player.append(queue);
+    main.prepend(player);
+    await tick();
+    await click('退出影院');
+    await click('影院模式');
+    w.history.pushState({}, '', '/video/second' + w.location.search);
+    w.dispatchEvent(new w.PopStateEvent('popstate'));
+    await tick();
+    assert.equal(player.parentNode, main);
+    assert.equal(queue.parentNode, player);
+    assert.equal(doc.querySelectorAll('#iwp-toolbar').length, 1);
+    for (const selector of ['.iwp-autoplay', '.iwp-theatre-toggle']) {
+      assert.equal(player.querySelectorAll(selector).length, 1);
+    }
+  } finally { dom.window.dispatchEvent(new dom.window.Event('pagehide')); dom.window.close(); }
+});
 test('UI does not wait for metadata and filenames are plain text and Windows safe', async () => {
   const { dom, w, counts, click } = await setup({ deferred: true });
   try {

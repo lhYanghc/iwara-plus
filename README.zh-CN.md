@@ -48,6 +48,8 @@
 
 ## 开发验证
 
+[插件运行时 UML 图](docs/architecture.zh-CN.md) · [English](docs/architecture.md)
+
 Node.js 20.19+（建议 22/24）与本地 Chrome，运行 `pnpm install --ignore-scripts`、`pnpm check`、`pnpm test`。浏览器测试以无头 Chrome 的临时会话运行，本地拦截全部请求，不使用个人 Chrome 配置。
 
 自动测试覆盖影院恢复、SPA 切换、重复注入、下载缺失保护、已喜欢状态、元数据失败、竖屏画质与播放器替换。另以模拟网站结构的本地浏览器页面验证 390/600/1000/1440 像素宽度下侧栏开合、卷轴动画、动画中反向切换、明暗主题和减少动态效果。测试不能替代网站实测和视频播放验证。

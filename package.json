@@ -12,7 +12,7 @@
   "packageManager": "pnpm@11.25.0",
   "scripts": {
     "test": "node --test tests/*.test.cjs",
-    "check": "node --check iwara-plus.user.js",
+    "check": "node --check iwara-plus.user.js && node scripts/check-uml.cjs",
     "build:meta": "node scripts/build-meta.cjs"
   },
   "devDependencies": {

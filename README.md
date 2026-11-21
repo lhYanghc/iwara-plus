@@ -42,6 +42,8 @@ You can also import `iwara-plus.user.js` as a local file, or paste its full cont
 
 ## Development and verification
 
+[Runtime UML diagrams](docs/architecture.md) · [中文版](docs/architecture.zh-CN.md)
+
 Requires Node.js 20.19+ (24 recommended), pnpm 11.25.0, and Chrome.
 
 ```sh

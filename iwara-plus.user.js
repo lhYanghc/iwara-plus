@@ -3,7 +3,7 @@
 // @name:zh-CN   Iwara Plus — 增强与影院融合版
 // @name:ja      Iwara Plus — 拡張機能とシアターモード
 // @namespace    iwara-plus
-// @version      1.0.14
+// @version      1.0.15
 // @author       lhYanghc
 // @homepageURL  https://github.com/lhYanghc/iwara-plus
 // @supportURL   https://github.com/lhYanghc/iwara-plus/issues
@@ -161,8 +161,9 @@
     .iwp-queue-nav {display:contents}
     .playlist a.iwp-queue-item:any-link {color:inherit;text-decoration:none}
     .playlist__items.iwp-refreshed {display:flex;flex-direction:column}
+    .playlist__items.iwp-queue-initializing {min-height:3rem}
     .iwp-refreshed > .playlist__item {flex:none;order:1}
-    .iwp-refreshed > .iwp-stale-row {display:none}
+    .iwp-refreshed > .iwp-stale-row,.iwp-queue-initializing > .playlist__item {display:none!important}
     .iwp-queue-position {font-variant-numeric:tabular-nums;white-space:nowrap}
     .playlist__header__about > .text:has(+ .iwp-queue-position:not(:empty)) {display:none}
     .iwp-queue-position:empty {display:none}
@@ -172,10 +173,26 @@
     .video-js .iwp-queue-nav [aria-disabled="true"] {color:#85898e;cursor:default}
     .page-video__player:has(.iwp-queue-toggle) {position:relative;column-gap:0}
     .page-video__player > .videoPlayer:has(~ .playlist) {position:relative;min-width:0}
+    :is(.videoPlayer,.video-js):fullscreen .vjs-control-bar {position:fixed;inset:auto 0 0;width:100%;box-sizing:border-box}
+    /* Video.js sets user-active on movement anywhere, including inside the list. */
+    :is(.page-video__player:fullscreen,.page-video__player :fullscreen) .vjs-control-bar:not(.iwp-controls-awake):not(:has(:focus-visible)) {
+      opacity:0!important;pointer-events:none!important;transition:none!important}
+    :fullscreen .video-js:not(.vjs-controls-disabled) .iwp-controls-awake,
+    .video-js:fullscreen:not(.vjs-controls-disabled) .iwp-controls-awake {
+      display:flex!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;
+      transition:none!important;z-index:19;color:#fff;background-color:rgba(26,31,38,.94)}
+    :fullscreen .iwp-controls-awake:popover-open {position:fixed;inset:auto auto 0 0;
+      width:calc(100% - var(--iwp-list-width,0px));margin:0;padding:0;border:0;overflow:visible;box-sizing:border-box}
+    .iwp-controls-awake::backdrop {display:none}
+    :fullscreen:has(.iwp-fullscreen-list) {--iwp-list-width:min(34vw,380px)}
     .playlist.iwp-fullscreen-list {position:fixed;inset:0 0 0 auto;z-index:20;box-sizing:border-box;cursor:auto;text-align:start;
-      width:min(34vw,380px);max-width:none;height:100%;max-height:none;margin:0;padding:0;border:0;
+      width:var(--iwp-list-width);min-width:0;max-width:none;height:auto;max-height:none;min-height:0;margin:0;padding:0;border:0;
       display:flex;flex-direction:column;background:var(--background,#202126);color:inherit}
-    .video-js:fullscreen:has(> .iwp-fullscreen-list) :is(video.vjs-tech,.vjs-control-bar) {width:calc(100% - min(34vw,380px))!important}
+    :fullscreen:has(.iwp-fullscreen-list) video.vjs-tech,
+    :fullscreen:has(.iwp-fullscreen-list) .vjs-control-bar {position:fixed;left:0;right:auto;width:calc(100vw - var(--iwp-list-width))!important;box-sizing:border-box}
+    :fullscreen:has(.iwp-fullscreen-list) .vjs-control-bar {top:auto;bottom:0}
+    :fullscreen:has(.iwp-fullscreen-list) video.vjs-tech {top:0;height:100vh!important;object-fit:contain}
+    :fullscreen:has(.iwp-fullscreen-list) .vjs-progress-control {min-width:0}
     .iwp-fullscreen-list > .playlist__items {min-height:0;overflow-y:auto}
     .page-video__player:has(.iwp-queue-toggle[aria-expanded="false"]) > .playlist {display:none}
     .page-video__player:has(.iwp-queue-toggle[aria-expanded="false"]) > .videoPlayer {width:100%;max-width:100%;flex:auto}
@@ -457,63 +474,129 @@
       video.removeEventListener('ratechange', reset);
     };
   }
-  function playlistPage(ctx, page, refresh = false) {
-    ctx.pages ||= new Map();
-    if (refresh || !ctx.pages.has(page)) {
+  function playlistPage(ctx, page, pages = ctx.pages) {
+    if (!pages.has(page)) {
       const url = new URL('https://api.iwara.tv/playlist/' + encodeURIComponent(ctx.playlist));
       url.searchParams.set('page', page);
-      ctx.pages.set(page, fetch(url, { signal: ctx.abort.signal, cache: refresh ? 'no-store' : 'default' }).then(async response => {
+      pages.set(page, fetch(url, { signal: ctx.abort.signal, cache: 'no-store' }).then(async response => {
         if (!response.ok) throw new Error('Playlist unavailable');
         const data = await response.json();
         if (data.page !== page || !Array.isArray(data.results) || !(data.limit > 0)) throw new Error('Invalid playlist page');
-        if (data.results.some(video => video.id === ctx.id)) ctx.currentPage = page;
-        // Keep only the fields needed for ordering and visible rows, not full video records.
-        const results = data.results.map(({ id, title, createdAt, user, file, thumbnail }) =>
-          ({ id, title, createdAt, author: user?.name, fileId: file?.id, thumbnail }));
+        const results = data.results.map(({ id, title, user, file, thumbnail }) =>
+          ({ id, title, author: user?.name, fileId: file?.id, thumbnail }));
+        if (pages === ctx.pages) for (const video of results) ctx.knownPages.set(video.id, page);
+        if (pages === ctx.pages && results.some(video => video.id === ctx.id)) {
+          ctx.currentPage = page;
+          if (ctx.deferredLookup) { ctx.queueLookup = null; schedule(); }
+        }
         return { page, count: data.count, limit: data.limit, results };
-      }).catch(error => { ctx.pages.delete(page); throw error; }));
+      }).catch(error => { pages.delete(page); throw error; }));
     }
-    return ctx.pages.get(page);
+    return pages.get(page);
   }
-  async function loadPlaylistOrder(ctx) {
-    let data = await playlistPage(ctx, ctx.currentPage ?? 0);
+  async function loadPlaylistOrder(ctx, pages, mode, locate = false) {
+    let data = await playlistPage(ctx, ctx.currentPage ?? 0, pages);
     const last = Math.ceil(data.count / data.limit) - 1;
-    // Use the site's newest-first order to locate a distant item without loading the whole queue.
-    let low = 1, high = last;
-    while (ctx.currentPage == null && low <= high && ctx.meta?.createdAt) {
-      const middle = Math.floor((low + high) / 2);
-      data = await playlistPage(ctx, middle);
-      if (ctx.meta.createdAt < data.results.at(-1)?.createdAt) low = middle + 1;
-      else high = middle - 1;
+    if (ctx.currentPage == null && ctx.pageHint > 0 && ctx.pageHint <= last) {
+      const hint = await playlistPage(ctx, ctx.pageHint, pages);
+      if (hint.results.some(video => video.id === ctx.id)) data = hint;
     }
-    if (ctx.currentPage == null) return [];
-    data = await playlistPage(ctx, ctx.currentPage);
-    const index = data.results.findIndex(video => video.id === ctx.id);
-    if (index < 0) return [];
+    if (last >= 8 && ctx.currentPage == null && !ctx.pendingStep && !locate) {
+      await playlistPage(ctx, last, pages);
+      if (ctx.currentPage == null && !ctx.pendingStep) return { deferred: true };
+    }
+    if (ctx.currentPage != null && ctx.currentPage !== data.page) data = await playlistPage(ctx, ctx.currentPage, pages);
+    let index = data.results.findIndex(video => video.id === ctx.id);
+    for (let page = 1; index < 0 && page <= last; page++) {
+      if (ctx.pages !== pages || ctx.abort.signal.aborted || ctx.orderMode !== mode) return;
+      if (last >= 8 && !ctx.pendingStep && !locate) return { deferred: true };
+      data = await playlistPage(ctx, page, pages);
+      index = data.results.findIndex(video => video.id === ctx.id);
+    }
+    if (index < 0 || ctx.pages !== pages || ctx.abort.signal.aborted) return;
+    ctx.currentPage = data.page;
     const absolute = data.page * data.limit + index;
-    ctx.positionText = (ctx.orderMode === 1 ? data.count - absolute : absolute + 1) + '/' + data.count;
-    schedule();
-    if (ctx.orderMode === 2) {
-      ctx.randomSource = { absolute, count: data.count, limit: data.limit };
-      return [];
+    const position = (mode === 1 ? data.count - absolute : absolute + 1) + '/' + data.count;
+    if (mode === 2) return { position, randomSource: { absolute, count: data.count, limit: data.limit }, neighbors: [] };
+    const prev = data.results[index - 1] || (data.page > 0 && (await playlistPage(ctx, data.page - 1, pages)).results.at(-1));
+    const next = data.results[index + 1] || (data.page < last && (await playlistPage(ctx, data.page + 1, pages)).results[0]);
+    return { position, neighbors: mode === 1 ? [next?.id, prev?.id] : [prev?.id, next?.id] };
+  }
+  function resetPlaylistNavigation(ctx) {
+    ctx.queueLookup = null;
+    ctx.queueRetry = 0;
+    ctx.randomSource = null;
+    ctx.orderReady = false;
+    ctx.deferredLookup = false;
+    ctx.positionText = '';
+    for (const link of ctx.queueNav?.children || []) {
+      link.removeAttribute('href');
+      link.setAttribute('aria-disabled', 'true');
+      if (link.tagName === 'BUTTON') link.disabled = true;
     }
-    const prev = data.results[index - 1] || (data.page > 0 && (await playlistPage(ctx, data.page - 1)).results.at(-1));
-    const next = data.results[index + 1] || (data.page < last && (await playlistPage(ctx, data.page + 1)).results[0]);
-    return ctx.orderMode === 1 ? [next?.id, prev?.id] : [prev?.id, next?.id];
+    schedule();
+  }
+  function requestPlaylistStep(ctx, index) {
+    if (ctx.orderReady) {
+      const control = ctx.queueNav?.children[index];
+      if (control?.getAttribute('aria-disabled') === 'false') control.click();
+      return;
+    }
+    ctx.pendingStep = { index };
+    ctx.queueRetry = 0;
+    if (ctx.deferredLookup) {
+      ctx.queueLookup = null;
+      ctx.deferredLookup = false;
+    }
+    schedule();
+  }
+  function routePlaylistLink(ctx, link, event) {
+    if (event.defaultPrevented || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const id = link.pathname.split('/')[2];
+    if (ctx.knownPages.has(id)) {
+      try { sessionStorage.setItem(ctx.orderKey + ':target', JSON.stringify([id, ctx.knownPages.get(id)])); } catch {}
+    }
+    const native = all('.playlist__item:not(.iwp-queue-item) a[href], a.playlist__item:not(.iwp-queue-item)[href]', ctx.player)
+      .find(item => item.pathname === link.pathname && item.search === link.search);
+    if (native) {
+      event.preventDefault();
+      native.click();
+      return;
+    }
+    // React Router tracks same-document history entries with an integer index.
+    if (Number.isInteger(history.state?.idx)) {
+      const state = { usr: null, key: crypto.randomUUID().slice(0, 8), idx: history.state.idx + 1 };
+      history.pushState(state, '', link.href);
+      event.preventDefault();
+      window.dispatchEvent(new PopStateEvent('popstate', { state }));
+    }
   }
   async function playRandomVideo(ctx, button) {
-    const source = ctx.randomSource;
+    let source = ctx.randomSource;
     if (!source || source.count < 2 || ctx.randomPending || button.disabled) return;
     ctx.randomPending = true;
     try {
-      const draw = Math.floor(Math.random() * (source.count - 1));
-      const index = draw < source.absolute ? draw : draw + 1;
-      const page = await playlistPage(ctx, Math.floor(index / source.limit));
-      const id = page.results[index % source.limit]?.id;
-      if (current !== ctx || !button.isConnected || ctx.orderMode !== 2 || !id || id === ctx.id) return;
-      const url = new URL(location.href);
-      url.pathname = '/video/' + encodeURIComponent(id);
-      location.assign(url.href);
+      while (current === ctx && button.isConnected && ctx.orderMode === 2) {
+        const pages = ctx.pages;
+        source ||= (await loadPlaylistOrder(ctx, pages, 2, true))?.randomSource;
+        if (ctx.pages !== pages) { source = null; continue; }
+        if (!source || source.count < 2) return;
+        const draw = Math.floor(Math.random() * (source.count - 1));
+        const index = draw < source.absolute ? draw : draw + 1;
+        const page = await playlistPage(ctx, Math.floor(index / source.limit), pages);
+        if (ctx.pages !== pages) { source = null; continue; }
+        const id = page.results[index % source.limit]?.id;
+        if (current !== ctx || !button.isConnected || ctx.orderMode !== 2 || !id || id === ctx.id) return;
+        const url = new URL(location.href);
+        url.pathname = '/video/' + encodeURIComponent(id);
+        const link = element('a', '', { href: url.href });
+        link.hidden = true;
+        link.onclick = event => routePlaylistLink(ctx, link, event);
+        ctx.player.append(link);
+        link.click();
+        link.remove();
+        return;
+      }
     } catch (error) {
       if (!ctx.abort.signal.aborted) console.debug('[Iwara Plus]', error);
     } finally {
@@ -522,6 +605,7 @@
   }
   function playlistRow(ctx, video) {
     const link = element('a', '', { class: 'playlist__item iwp-queue-item', href: '/video/' + encodeURIComponent(video.id) + '?playlist=' + encodeURIComponent(ctx.playlist) });
+    link.onclick = event => routePlaylistLink(ctx, link, event);
     if (video.fileId) {
       const thumb = String(video.thumbnail || 0).padStart(2, '0');
       link.append(element('img', '', { loading: 'lazy', alt: '', class: 'thumbnail', src: 'https://i.iwara.tv/image/thumbnail/' + encodeURIComponent(video.fileId) + '/thumbnail-' + thumb + '.jpg' }));
@@ -547,9 +631,9 @@
     ctx.reverseList = reverse;
     const listeners = new AbortController();
     let initialize = reverse || switching;
-    let nextPage = 1, pending = false, done = false, shownFirst;
+    let nextPage = 1, pending, done = false;
     let previousTop = list.scrollTop, touchY, retryTopAt = 0;
-    let topQueued = false, refreshing = false;
+    let refreshing = false;
     const status = element('span', '', { role: 'status', class: 'text text--small' });
     const header = $('.playlist__header', list.parentElement) || $('.playlist__header__about', list.parentElement);
     header?.append(status);
@@ -560,7 +644,7 @@
       listeners.abort();
       clearTimeout(statusTimer);
       all('.iwp-queue-item', list).forEach(node => node.remove());
-      list.classList.remove('iwp-refreshed');
+      list.classList.remove('iwp-refreshed', 'iwp-queue-initializing');
       for (const row of all(':scope > .playlist__item', list)) {
         row.classList.remove('iwp-stale-row');
         row.style.removeProperty('order');
@@ -580,73 +664,69 @@
         delete status.dataset.iwpTextContent;
       }, 2400);
     };
-    const nativeRows = new Map();
     let renderedIds, retryBottomAt = 0;
     const updatePage = async upward => {
       if (listeners.signal.aborted || current !== ctx || ctx.queueList !== list) return;
+      if (initialize && Date.now() < retryBottomAt) return;
       if (!initialize && (ctx.queueToggle.getAttribute('aria-expanded') === 'false' || (upward ? list.scrollTop > 1 || Date.now() < retryTopAt
         : done || Date.now() < retryBottomAt || list.scrollHeight - list.clientHeight - list.scrollTop > 160))) return;
-      if (pending) {
-        if (upward && !refreshing) topQueued = true;
-        return;
-      }
-      pending = true;
+      if (pending && (!upward || refreshing)) return;
+      // A top refresh supersedes a pending append, including its page requests.
+      const request = {};
+      pending = request;
       refreshing = upward;
       let message = '刷新失败，请再向上滚动重试';
       try {
-        if (upward) feedback('正在刷新列表…');
-        const first = await playlistPage(ctx, 0, upward && !initialize);
+        if (upward) {
+          feedback('正在刷新列表…');
+          ctx.pages = new Map();
+          ctx.knownPages.clear();
+          ctx.pageHint = undefined;
+          ctx.currentPage = undefined;
+          initialize = true;
+          resetPlaylistNavigation(ctx);
+        }
+        const first = await playlistPage(ctx, 0);
+        if (pending !== request || listeners.signal.aborted) return;
         if (upward || initialize) {
           let page = reverse ? Math.max(0, Math.ceil(first.count / first.limit) - 1) : 0;
           let head = first;
           while (page > 0) {
-            head = await playlistPage(ctx, page, !initialize);
+            head = await playlistPage(ctx, page);
+            if (pending !== request || listeners.signal.aborted) return;
             if (head.results.length) break;
             if (--page === 0) head = first;
           }
           const fresh = reverse ? { ...head, results: [...head.results].reverse() } : head;
           if (listeners.signal.aborted || current !== ctx || ctx.queueList !== list) return;
           const native = all(':scope > .playlist__item:not(.iwp-queue-item)', list);
-          const firstRefresh = !list.classList.contains('iwp-refreshed');
-          const visibleMatches = !firstRefresh || (native.length === fresh.results.length && native.every((row, i) =>
-            $('.playlist__item__info', row)?.firstElementChild?.textContent === fresh.results[i].title));
-          if (!initialize && visibleMatches && shownFirst?.count === fresh.count && JSON.stringify(shownFirst.results) === JSON.stringify(fresh.results)) {
-            message = '列表已是最新';
-            return;
-          }
-          for (const [index, row] of native.entries()) {
-            const item = first.results[index];
-            if (firstRefresh) {
-              if (item && $('.playlist__item__info', row)?.firstElementChild?.textContent === item.title) nativeRows.set(item.id, row);
-            }
+          const nativeRows = new Map();
+          for (const row of native) {
+            const link = row.matches('a[href]') ? row : $('a[href*="/video/"]', row);
+            const id = link?.pathname?.match(/^\/video\/([^/]+)/)?.[1];
+            if (id) nativeRows.set(id, row);
             row.classList.add('iwp-stale-row');
           }
           all('.iwp-queue-item', list).forEach(row => row.remove());
           list.classList.add('iwp-refreshed');
           fresh.results.forEach((video, index) => {
-            let row = nativeRows.get(video.id);
-            if (!row?.isConnected) {
-              row = playlistRow(ctx, video);
-              list.append(row);
-            } else {
+            const row = nativeRows.get(video.id);
+            const freshRow = playlistRow(ctx, video);
+            const info = row && $('.playlist__item__info', row);
+            if (info && info.firstElementChild?.textContent === video.title &&
+                $('.username .text', info)?.textContent === (video.author || '') &&
+                $('.thumbnail', row)?.src === $('.thumbnail', freshRow)?.src) {
               row.classList.remove('iwp-stale-row');
-              const info = $('.playlist__item__info', row);
-              if (info?.firstElementChild) info.firstElementChild.textContent = video.title;
-              const author = $('.username .text', row);
-              if (author) author.textContent = video.author || '';
+              row.style.order = String(index - fresh.results.length);
+            } else {
+              freshRow.style.order = String(index - fresh.results.length);
+              list.append(freshRow);
             }
-            row.style.order = String(index - fresh.results.length);
           });
-          if (!initialize) ctx.pages.clear();
-          ctx.pages.set(0, Promise.resolve(first));
-          ctx.pages.set(page, Promise.resolve(head));
-          shownFirst = fresh;
-          if (!initialize) ctx.currentPage = fresh.results.some(video => video.id === ctx.id) ? page : undefined;
-          ctx.positionText = '';
-          ctx.queueLookup = null;
           nextPage = reverse ? page - 1 : 1;
           renderedIds = new Set(fresh.results.map(video => video.id));
           done = nextPage < 0 || nextPage * fresh.limit >= fresh.count;
+          list.classList.remove('iwp-queue-initializing');
           initialize = false;
           schedule();
           message = '列表已更新';
@@ -654,34 +734,31 @@
         }
         if (nextPage * first.limit >= first.count) { done = true; return; }
         const data = await playlistPage(ctx, nextPage);
-        if (listeners.signal.aborted || current !== ctx || ctx.queueList !== list) return;
-        shownFirst ||= first;
+        if (pending !== request || listeners.signal.aborted || current !== ctx || ctx.queueList !== list) return;
         renderedIds ||= new Set(first.results.map(video => video.id));
-        const nativeFiles = new Set(all('.playlist__item:not(.iwp-queue-item):not(.iwp-stale-row) .thumbnail', list)
-          .map(image => image.src?.match(/\/thumbnail\/([^/]+)\//)?.[1]).filter(Boolean));
         const fragment = document.createDocumentFragment();
         for (const video of reverse ? [...data.results].reverse() : data.results) {
           if (renderedIds.has(video.id)) continue;
           renderedIds.add(video.id);
-          if (nativeFiles.has(video.fileId)) continue;
           fragment.append(playlistRow(ctx, video));
         }
         list.append(fragment);
         nextPage += reverse ? -1 : 1;
         done = nextPage < 0 || nextPage * data.limit >= data.count;
       } catch {
-        if (!upward) retryBottomAt = Date.now() + 1500;
+        if (pending === request && (!upward || initialize)) {
+          retryBottomAt = Date.now() + 1500;
+          if (initialize && !upward) feedback(message);
+        }
       }
       finally {
-        pending = false;
-        refreshing = false;
-        if (upward && !listeners.signal.aborted && current === ctx && ctx.queueList === list) {
-          retryTopAt = Date.now() + 1000;
-          feedback(message);
-        }
-        if (topQueued) {
-          topQueued = false;
-          updatePage(true);
+        if (pending === request) {
+          pending = null;
+          refreshing = false;
+          if (upward && !listeners.signal.aborted && current === ctx && ctx.queueList === list) {
+            retryTopAt = Date.now() + 1000;
+            feedback(message);
+          }
         }
       }
     };
@@ -701,9 +778,10 @@
       touchY = y;
     }, options);
     if (initialize) {
+      list.classList.add('iwp-queue-initializing');
       list.scrollTop = 0;
       updatePage(false);
-    } else playlistPage(ctx, 0).then(data => { shownFirst ||= data; }).catch(() => {});
+    }
   }
   function clearFullscreenList(ctx) {
     const panel = ctx.fullscreenPanel;
@@ -720,10 +798,14 @@
     const surface = $('.videoPlayer', ctx.player);
     if (!panel || !surface) return;
     if (!ctx.orderButton) {
+      ctx.pages = new Map();
+      ctx.knownPages = new Map();
       ctx.orderKey = 'iwp-order:' + ctx.playlist;
       ctx.orderMode = 0;
       try {
         ctx.orderMode = [0, 1, 2][Number(sessionStorage.getItem(ctx.orderKey))] || 0;
+        const target = JSON.parse(sessionStorage.getItem(ctx.orderKey + ':target'));
+        if (Array.isArray(target) && target[0] === ctx.id && Number.isInteger(target[1])) ctx.pageHint = target[1];
         sessionStorage.removeItem(ctx.orderKey + ':shuffle');
       } catch {}
       const button = element('button', '', { type: 'button', class: 'iwp-order' });
@@ -736,24 +818,22 @@
         button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + path + '"/></svg>';
       };
       button.onclick = () => {
+        ctx.pendingStep = null;
         ctx.orderMode = (ctx.orderMode + 1) % 3;
         try { sessionStorage.setItem(ctx.orderKey, String(ctx.orderMode)); } catch {}
-        ctx.randomSource = null;
-        ctx.queueLookup = null;
-        for (const link of ctx.queueNav?.children || []) {
-          link.removeAttribute('href');
-          link.setAttribute('aria-disabled', 'true');
-        }
+        resetPlaylistNavigation(ctx);
         refresh();
         schedule();
       };
       refresh();
       ctx.orderButton = button;
+      ctx.player.addEventListener('play', event => {
+        if (event.target === ctx.video) ctx.pendingStep = null;
+      }, { capture: true, signal: ctx.abort.signal });
       window.addEventListener('ended', event => {
         if (!ctx.orderMode || event.target !== ctx.video || ctx.id !== videoId()) return;
         event.stopPropagation();
-        const next = ctx.queueNav?.lastElementChild;
-        if (next?.getAttribute('aria-disabled') === 'false') next.click();
+        requestPlaylistStep(ctx, 1);
       }, { capture: true, signal: ctx.abort.signal });
     }
     const header = $('.playlist__header', panel);
@@ -787,31 +867,31 @@
       let hideTimer;
       const reveal = () => {
         clearTimeout(hideTimer);
+        hideTimer = null;
         toggle.classList.add('iwp-near-edge');
-        hideTimer = setTimeout(() => toggle.classList.remove('iwp-near-edge'), 900);
       };
-      const updatePlayback = () => {
-        const video = ctx.video;
-        const playing = !!video && !video.paused && !video.ended;
-        if (playing && !toggle.classList.contains('iwp-playing')) reveal();
+      const leaveEdge = () => {
+        if (hideTimer || !toggle.classList.contains('iwp-near-edge')) return;
+        hideTimer = setTimeout(() => {
+          toggle.classList.remove('iwp-near-edge');
+          hideTimer = null;
+        }, 900);
+      };
+      ctx.updateQueuePlayback = () => {
+        const playing = !!ctx.video && !ctx.video.paused && !ctx.video.ended;
+        const wasPlaying = toggle.classList.contains('iwp-playing');
         toggle.classList.toggle('iwp-playing', playing);
-      };
-      const options = { capture: true, signal: ctx.abort.signal };
-      for (const type of ['play', 'playing', 'pause', 'ended', 'emptied'])
-        ctx.player.addEventListener(type, updatePlayback, options);
-      ctx.updateQueuePlayback = updatePlayback;
-      ctx.abort.signal.addEventListener('abort', () => clearTimeout(hideTimer), { once: true });
-      const watchEdge = event => {
         const rect = toggle.getBoundingClientRect();
-        if (event.clientX >= rect.left - 24 && event.clientX <= rect.right + 24 &&
-            event.clientY >= rect.top - 24 && event.clientY <= rect.bottom + 24) reveal();
+        const point = ctx.controlPointer;
+        if (point && point.x >= rect.left - 24 && point.x <= rect.right + 24 &&
+            point.y >= rect.top - 24 && point.y <= rect.bottom + 24) reveal();
+        else if (!wasPlaying && playing) toggle.classList.remove('iwp-near-edge');
+        else leaveEdge();
       };
-      ctx.player.addEventListener('pointermove', watchEdge, options);
-      ctx.player.addEventListener('pointerdown', watchEdge, options);
+      ctx.abort.signal.addEventListener('abort', () => clearTimeout(hideTimer), { once: true });
       refresh();
       ctx.queueToggle = toggle;
     }
-    ctx.updateQueuePlayback();
     const fullscreen = document.fullscreenElement;
     const host = fullscreen && surface.contains(fullscreen) ? fullscreen : ctx.player;
     const expanded = ctx.queueToggle.getAttribute('aria-expanded') === 'true';
@@ -820,7 +900,9 @@
     if (overlay && !ctx.fullscreenPanel) {
       ctx.panelAnchor = document.createComment('playlist fullscreen position');
       panel.before(ctx.panelAnchor);
-      fullscreen.append(panel);
+      // Keep settings menus and the list in the same stacking context.
+      const controlsHost = bar?.closest('.video-js');
+      (controlsHost && fullscreen.contains(controlsHost) ? controlsHost : fullscreen).append(panel);
       panel.classList.add('iwp-fullscreen-list');
       ctx.fullscreenPanel = panel;
     }
@@ -862,8 +944,21 @@
         if (random) {
           link.type = 'button';
           link.disabled = true;
-          link.onclick = () => playRandomVideo(ctx, link);
         }
+        const index = ctx.queueNav.children.length;
+        link.onclick = event => {
+          if (!ctx.orderReady) {
+            event.preventDefault();
+            requestPlaylistStep(ctx, index);
+          } else if (random) playRandomVideo(ctx, link);
+          else if (link.hasAttribute('href')) routePlaylistLink(ctx, link, event);
+        };
+        if (!random) link.onkeydown = event => {
+          if (!link.hasAttribute('href') && link.tabIndex === 0 && ['Enter', ' '].includes(event.key)) {
+            event.preventDefault();
+            link.click();
+          }
+        };
         ctx.queueNav.append(link);
       }
     }
@@ -872,14 +967,31 @@
       if (play?.parentElement === bar) play.after(ctx.queueNav);
       else bar.prepend(ctx.queueNav);
     }
-    const lookup = ctx.currentPage ?? ctx.meta?.createdAt ?? 'initial';
-    if (!ctx.queueRequest && ctx.queueLookup !== lookup && Date.now() >= (ctx.queueRetry || 0)) {
-      ctx.queueLookup = lookup;
+    const pages = ctx.pages;
+    if (ctx.queueLookup !== pages && Date.now() >= (ctx.queueRetry || 0)) {
+      ctx.queueLookup = pages;
       const mode = ctx.orderMode;
-      ctx.queueRequest = loadPlaylistOrder(ctx).then(neighbors => {
-        if (current !== ctx || mode !== ctx.orderMode) return;
-        if (ctx.currentPage != null) ctx.queueLookup = ctx.currentPage;
+      loadPlaylistOrder(ctx, pages, mode).then(result => {
+        if (current !== ctx || ctx.pages !== pages || mode !== ctx.orderMode) return;
+        if (result?.deferred) {
+          ctx.deferredLookup = true;
+          for (const control of ctx.queueNav.children) {
+            control.setAttribute('aria-disabled', 'false');
+            if (random) control.disabled = false;
+            else { control.setAttribute('role', 'button'); control.tabIndex = 0; }
+          }
+          if (ctx.pendingStep || ctx.currentPage != null) { ctx.queueLookup = null; schedule(); }
+          return;
+        }
+        ctx.orderReady = true;
+        ctx.deferredLookup = false;
+        ctx.positionText = result?.position || '';
+        ctx.randomSource = result?.randomSource;
+        const neighbors = result?.neighbors || [];
+        schedule();
         Array.from(ctx.queueNav.children).forEach((link, i) => {
+          link.removeAttribute('role');
+          link.removeAttribute('tabindex');
           if (random) {
             link.disabled = !(ctx.randomSource?.count > 1);
             link.setAttribute('aria-disabled', String(link.disabled));
@@ -895,10 +1007,14 @@
           link.href = url.href;
           link.setAttribute('aria-disabled', 'false');
         });
+        const step = ctx.pendingStep;
+        ctx.pendingStep = null;
+        if (step && ctx.id === videoId()) requestPlaylistStep(ctx, step.index);
       }).catch(() => {
+        if (current !== ctx || ctx.pages !== pages || mode !== ctx.orderMode) return;
         ctx.queueLookup = null;
         ctx.queueRetry = Date.now() + 30000;
-      }).finally(() => { ctx.queueRequest = null; if (current === ctx && ctx.queueLookup === null) schedule(); });
+      });
     }
   }
   function enhance(ctx) {
@@ -971,6 +1087,7 @@
           (ctx.autoplayControl.parentNode !== bar || ctx.autoplayControl.nextElementSibling !== anchor))
         bar.insertBefore(ctx.autoplayControl, anchor);
     }
+    ctx.updateControls();
     const source = $('.vjs-menu-item.resolution-Source', ctx.player);
     if (settings.source && source && ctx.sourceItem !== source) {
       ctx.sourceItem = source;
@@ -1008,9 +1125,89 @@
     old.queueStatus?.remove();
     old.queuePosition?.remove();
   }
+  function bindFullscreenControls(ctx) {
+    let awakeBar, awakeHost, ownsPopover = false;
+    const reset = () => {
+      if (ownsPopover) {
+        awakeBar.removeAttribute('popover');
+        ownsPopover = false;
+      }
+      awakeBar?.classList.remove('iwp-controls-awake');
+      awakeBar = null;
+      awakeHost = null;
+    };
+    ctx.updateControls = () => {
+      ctx.updateQueuePlayback?.();
+      const host = document.fullscreenElement;
+      const video = ctx.video;
+      const root = video?.closest('.video-js');
+      const bar = root && $('.vjs-control-bar', root);
+      if (!host || !ctx.player.contains(host) || !bar || !host.contains(bar) || root.classList.contains('vjs-controls-disabled')) {
+        if (awakeBar) reset();
+        return;
+      }
+      if (!video.paused && !video.ended) {
+        const surface = host === ctx.player ? $('.videoPlayer', host) : host;
+        const frame = (surface || host).getBoundingClientRect();
+        const sidebar = ctx.queueToggle?.getAttribute('aria-expanded') === 'true'
+          ? ctx.edgePanel?.getBoundingClientRect() : null;
+        const right = sidebar?.width && sidebar.left > frame.left && sidebar.top < frame.bottom
+          ? Math.min(frame.right, sidebar.left) : frame.right;
+        const point = ctx.controlPointer;
+        let inside = false;
+        if (point && point.x >= frame.left && point.x < right && point.y <= frame.bottom) {
+          inside = point.y >= frame.bottom - Math.max(56, bar.offsetHeight);
+          if (!inside && awakeBar === bar) {
+            const hit = document.elementFromPoint(point.x, point.y);
+            inside = !!hit && (bar.contains(hit) || all('[aria-controls]', bar).some(control =>
+              control.getAttribute('aria-controls').split(/\s+/).some(id => document.getElementById(id)?.contains(hit))));
+          }
+        }
+        if (!inside && !bar.querySelector(':focus-visible')) {
+          if (awakeBar) reset();
+          return;
+        }
+      }
+      if (awakeBar !== bar || awakeHost !== host) reset();
+      const waking = awakeBar !== bar;
+      awakeBar = bar;
+      awakeHost = host;
+      bar.classList.add('iwp-controls-awake');
+      if (bar.showPopover && !bar.hasAttribute('popover')) {
+        bar.setAttribute('popover', 'manual');
+        ownsPopover = true;
+      }
+      if (ownsPopover && !bar.matches(':popover-open')) bar.showPopover();
+      if (waking) root.player?.userActive?.(true);
+    };
+    const options = { capture: true, passive: true, signal: ctx.abort.signal };
+    const track = event => {
+      ctx.controlPointer = { x: event.clientX, y: event.clientY };
+      ctx.updateControls();
+    };
+    const forget = () => {
+      ctx.controlPointer = null;
+      ctx.updateControls();
+    };
+    for (const type of ['pointermove', 'pointerover', 'pointerdown']) window.addEventListener(type, track, options);
+    window.addEventListener('pointerout', event => {
+      // Moving a bar into the top layer can retarget the pointer at the same coordinates.
+      if (!event.relatedTarget && (event.clientX < 0 || event.clientY < 0 ||
+          event.clientX >= innerWidth || event.clientY >= innerHeight)) forget();
+    }, options);
+    window.addEventListener('blur', forget, { signal: ctx.abort.signal });
+    for (const type of ['playing', 'play', 'pause', 'ended', 'emptied'])
+      ctx.player.addEventListener(type, ctx.updateControls, options);
+    document.addEventListener('fullscreenchange', ctx.updateControls, options);
+    ctx.player.addEventListener('toggle', event => {
+      if (event.target === awakeBar && event.newState === 'closed') ctx.updateControls();
+    }, options);
+    ctx.abort.signal.addEventListener('abort', reset, { once: true });
+  }
   function mount(id, player, details, playlist) {
     const ctx = { id, player, details, playlist, nativeActions: new Map(), nativeStats: new Map(), abort: new AbortController() };
     current = ctx;
+    bindFullscreenControls(ctx);
     player.addEventListener('keydown', event => {
       if (event.defaultPrevented || event.repeat || event.isComposing || event.ctrlKey ||
           event.altKey || event.metaKey || event.shiftKey || ctx.id !== videoId()) return;

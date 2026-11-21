@@ -8,7 +8,7 @@
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.14 运行结构
+title: Iwara Plus v1.0.15 运行结构
 ---
 classDiagram
     direction TB
@@ -36,6 +36,7 @@ classDiagram
         theatre()
         restore()
         attachVideo()
+        bindFullscreenControls()
     }
     class Toolbar["工具栏操作"] {
         filename()
@@ -49,6 +50,8 @@ classDiagram
         playlistPage()
         loadPlaylistOrder()
         playRandomVideo()
+        requestPlaylistStep()
+        routePlaylistLink()
     }
     class API["Iwara API"]
     Lifecycle "1" *-- "0..1" Context : 持有
@@ -66,7 +69,7 @@ classDiagram
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.14 视频页生命周期
+title: Iwara Plus v1.0.15 视频页生命周期
 ---
 sequenceDiagram
     participant B as 浏览器与 Iwara 页面
@@ -102,7 +105,7 @@ sequenceDiagram
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.14 起播保护
+title: Iwara Plus v1.0.15 起播保护
 ---
 stateDiagram-v2
     state "等待用户起播" as Guarded
@@ -123,7 +126,7 @@ stateDiagram-v2
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.14 工具栏一键操作
+title: Iwara Plus v1.0.15 工具栏一键操作
 ---
 sequenceDiagram
     actor U as 用户
@@ -149,27 +152,65 @@ sequenceDiagram
 
 ## 播放列表导航
 
-列表分页缓存在当前视频上下文中。倒序和随机模式在视频结束时触发可用的下一项控件。侧栏按需加载分页以扩展列表。进入全屏时，已展开的面板可移入全屏元素，退出时按锚点归位。播放顺序与侧栏折叠状态保存在会话存储中。
+列表分页缓存在当前视频上下文中。倒序和随机模式在视频结束时等待所需分页就绪后切换下一项。侧栏按需加载分页以扩展列表。进入全屏时，已展开的面板可移入全屏元素，退出时按锚点归位。播放顺序与侧栏折叠状态保存在会话存储中。
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.14 播放列表导航
+title: Iwara Plus v1.0.15 播放列表导航
 ---
 sequenceDiagram
     participant C as 播放列表控件
     participant Q as 播放列表数据
     participant A as Iwara API
     participant B as 浏览器
-    C->>Q: loadPlaylistOrder(ctx)
-    Q->>A: 按需获取分页以定位当前视频
+    opt 向上滚到顶部刷新
+        C->>Q: 替换分页缓存并清除旧位置
+        Q->>A: 顺序和随机先读首页，倒序先确定末页
+        Q-->>C: 按视频 ID 重建条目，后续页随滚动加载
+    end
+    Q->>A: 查找当前视频 ID，大列表按需继续定位
     A-->>Q: 视频条目、总数与分页大小
+    opt 倒序或随机播放结束且分页未就绪
+        C->>Q: 保留下一条请求，数据就绪后继续
+    end
     alt 顺序或倒序
         Q-->>C: 按所选顺序返回相邻条目与位置
-        C->>B: 激活可用的上下集链接
     else 随机
         Q-->>C: 当前位置、总数与分页大小
         C->>Q: 抽取当前项以外的随机位置
         Q->>Q: 通过 playlistPage() 读取目标条目
-        Q->>B: 确认上下文和模式仍有效后跳转
+        opt 刷新使本次抽取失效
+            Q->>Q: 根据新分页重新定位并抽取
+        end
+    end
+    C->>B: 优先站内导航，必要时使用普通链接
+```
+
+## 全屏控件显示
+
+侧栏展开时，底部感应区仅覆盖视频宽度。
+
+```mermaid
+---
+title: Iwara Plus v1.0.15 全屏控件显示
+---
+sequenceDiagram
+    participant B as 浏览器
+    participant P as 播放器
+    participant S as 列表收放按钮
+    alt 暂停或播放结束
+        B->>P: 显示底部栏和列表收放按钮
+    else 播放中
+        opt 靠近视频底部或停留在已唤出的菜单
+            B->>P: 唤出或保持底部栏
+        end
+        opt 离开且控件无键盘焦点
+            B->>P: 恢复播放器自身的隐藏逻辑
+        end
+        opt 靠近列表收放按钮
+            B->>S: 悬停期间保持显示，移开约 0.9 秒后淡出
+        end
     end
 ```
+
+部分设备开启 Chrome 图形加速后可能仅显示按钮提示。根据目前排查，这可能与显示器和显卡驱动的组合有关，可尝试更新显卡驱动或关闭图形加速后重启 Chrome。

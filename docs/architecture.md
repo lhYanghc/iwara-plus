@@ -8,7 +8,7 @@ The boxes group functions in the userscript by responsibility. The script holds 
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.14 Runtime structure
+title: Iwara Plus v1.0.15 Runtime structure
 ---
 classDiagram
     direction TB
@@ -36,6 +36,7 @@ classDiagram
         theatre()
         restore()
         attachVideo()
+        bindFullscreenControls()
     }
     class Toolbar["Toolbar actions"] {
         filename()
@@ -49,6 +50,8 @@ classDiagram
         playlistPage()
         loadPlaylistOrder()
         playRandomVideo()
+        requestPlaylistStep()
+        routePlaylistLink()
     }
     class API["Iwara API"]
     Lifecycle "1" *-- "0..1" Context : owns
@@ -66,7 +69,7 @@ A change of video, playlist, details node or player container can trigger a remo
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.14 Video page lifecycle
+title: Iwara Plus v1.0.15 Video page lifecycle
 ---
 sequenceDiagram
     participant B as Browser and Iwara page
@@ -102,7 +105,7 @@ A surface click focuses the player. After 500 ms it toggles playback if the vide
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.14 Playback startup guard
+title: Iwara Plus v1.0.15 Playback startup guard
 ---
 stateDiagram-v2
     state "Waiting for user playback" as Guarded
@@ -123,7 +126,7 @@ The toolbar also supports copying a filename, downloading the source and opening
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.14 Combined toolbar action
+title: Iwara Plus v1.0.15 Combined toolbar action
 ---
 sequenceDiagram
     actor U as Viewer
@@ -149,27 +152,65 @@ sequenceDiagram
 
 ## Playlist navigation
 
-Playlist pages are cached per video context. Reverse and random modes use the enabled next control when playback ends. The sidebar extends the visible list by loading pages as needed. In fullscreen the expanded panel can move into the fullscreen element and return to its anchor on exit. Order mode and sidebar collapse state use session storage.
+Playlist pages are cached per video context. Reverse and random modes wait for pending playlist data before advancing at the end of playback. The sidebar extends the visible list by loading pages as needed. In fullscreen the expanded panel can move into the fullscreen element and return to its anchor on exit. Order mode and sidebar collapse state use session storage.
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.14 Playlist navigation
+title: Iwara Plus v1.0.15 Playlist navigation
 ---
 sequenceDiagram
     participant C as Playlist controls
     participant Q as Playlist data
     participant A as Iwara API
     participant B as Browser
-    C->>Q: loadPlaylistOrder(ctx)
-    Q->>A: Fetch missing pages to locate current item
+    opt Refresh at the top
+        C->>Q: Replace page cache and clear saved positions
+        Q->>A: Read first page, then resolve last page for reverse order
+        Q-->>C: Rebuild rows by video ID and load further pages on scroll
+    end
+    Q->>A: Locate current video by ID, deferring large-list scans until needed
     A-->>Q: Items, count and page size
+    opt Reverse or random playback ends before pages are ready
+        C->>Q: Keep the next request and resume when data arrives
+    end
     alt Forward or reverse
         Q-->>C: Neighbors in selected order and position
-        C->>B: Follow an enabled navigation link
     else Random
         Q-->>C: Current index, count and page size
         C->>Q: Draw an index excluding the current item
         Q->>Q: Resolve item via playlistPage()
-        Q->>B: Navigate if context and mode still match
+        opt Refresh invalidates the draw
+            Q->>Q: Locate the current item again and redraw from fresh pages
+        end
+    end
+    C->>B: Prefer same-document navigation and fall back to a normal link
+```
+
+## Fullscreen control visibility
+
+With the sidebar open, the bottom activation area spans only the video width.
+
+```mermaid
+---
+title: Iwara Plus v1.0.15 Fullscreen control visibility
+---
+sequenceDiagram
+    participant B as Browser
+    participant P as Player
+    participant S as Playlist toggle
+    alt Paused or ended
+        B->>P: Show bottom controls and playlist toggle
+    else Playing
+        opt Near video bottom or over its open menu
+            B->>P: Reveal or keep bottom controls visible
+        end
+        opt Pointer away and no keyboard focus in controls
+            B->>P: Restore native control visibility
+        end
+        opt Near playlist toggle
+            B->>S: Stay visible while hovered and fade after about 0.9 s away
+        end
     end
 ```
+
+On some devices Chrome may show only tooltips during fullscreen playback with graphics acceleration enabled. Current observations suggest a display and graphics driver compatibility issue. Updating the driver or turning off graphics acceleration and restarting Chrome may help.

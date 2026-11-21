@@ -9,6 +9,7 @@ const topics = [
   ['stateDiagram-v2', 'Playback startup guard', '起播保护'],
   ['sequenceDiagram', 'Combined toolbar action', '工具栏一键操作'],
   ['sequenceDiagram', 'Playlist navigation', '播放列表导航'],
+  ['sequenceDiagram', 'Fullscreen control visibility', '全屏控件显示'],
 ];
 
 for (const [filename, titleIndex] of [['architecture.md', 1], ['architecture.zh-CN.md', 2]]) {

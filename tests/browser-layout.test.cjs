@@ -31,6 +31,7 @@ test('browser: playlist controls cross page boundaries and reveal a collapsed qu
   const browser = await chromium.launch({ channel: 'chrome' });
   try {
     const page = await browser.newPage({ deviceScaleFactor: 1.25 });
+    await page.addInitScript(() => { window.GM_setValue = () => {}; });
     await page.addInitScript({ content: script });
     const requested = [];
     const ids = ['one','two','three','four','five'];
@@ -75,11 +76,13 @@ test('browser: playlist controls cross page boundaries and reveal a collapsed qu
     for (let i = 0; i < 4; i++) await list.dispatchEvent('wheel', { deltaY: 120 });
     assert.deepEqual(requested, [0, 1, 2, 3, 4]);
     await list.hover();
-    const refreshed = page.waitForEvent('console', msg => /up to date|列表已是最新/.test(msg.text()));
+    const refreshed = page.waitForEvent('console', msg => /Playlist updated|列表已更新/i.test(msg.text()));
     await page.mouse.wheel(0, -800);
     await refreshed;
     assert.equal(await page.getByText(/up to date|列表已是最新/).count(), 0);
-    assert.deepEqual(requested, [0, 1, 2, 3, 4, 0]);
+    await list.dispatchEvent('wheel', { deltaY: 120 });
+    await list.getByRole('link', { name: 'two Author' }).waitFor();
+    assert.deepEqual(requested, [0, 1, 2, 3, 4, 0, 1]);
     await list.evaluate(node => node.removeAttribute('style'));
     for (const theme of ['light', 'dark']) {
       const colors = await list.evaluate((node, theme) => {
@@ -139,12 +142,16 @@ test('browser: playlist controls cross page boundaries and reveal a collapsed qu
       const box = await toggle.boundingBox();
       await page.mouse.move(box.x + 16, box.y + 32);
       await waitForOpacity('1');
+      await page.waitForTimeout(1350);
+      assert.equal(await toggle.evaluate(node => getComputedStyle(node).opacity), '1');
+      await page.mouse.move(0, 0);
       await page.waitForFunction(() => {
         const opacity = Number(getComputedStyle(document.querySelector('.iwp-queue-toggle')).opacity);
         return opacity > 0 && opacity < 0.8;
       });
       await page.mouse.move(box.x + 15, box.y + 31);
       await waitForOpacity('1');
+      await page.mouse.move(0, 0);
       await waitForOpacity('0');
       await page.mouse.move(box.x + 18, box.y + 30);
       await waitForOpacity('1');
@@ -154,7 +161,137 @@ test('browser: playlist controls cross page boundaries and reveal a collapsed qu
       await waitForOpacity('1');
       assert.equal(await page.locator('video').evaluate(video => video.paused), true);
     }
+    await page.locator('.vjs-control-bar').evaluate(bar => {
+      document.querySelector('video').classList.add('vjs-tech');
+      document.querySelector('video').style.display = 'block';
+      bar.querySelector('.vjs-fullscreen-control').onclick = () => document.exitFullscreen();
+      const volume = document.createElement('button');
+      volume.className = 'vjs-mute-control';
+      volume.textContent = 'Volume';
+      bar.prepend(volume);
+      const settings = document.createElement('button');
+      settings.className = 'vjs-menu-button';
+      settings.textContent = 'Settings';
+      const menu = document.createElement('button');
+      menu.textContent = 'Source';
+      menu.hidden = true;
+      menu.style.cssText = 'position:absolute;bottom:100%;right:0';
+      settings.onclick = () => { menu.hidden = !menu.hidden; };
+      bar.append(settings, menu);
+    });
+    await page.addStyleTag({ content: `
+      .video-js.vjs-user-inactive .vjs-control-bar {visibility:hidden;opacity:0;pointer-events:none}
+      .video-js.vjs-user-inactive::after {content:'';position:fixed;inset:auto 0 0;height:60px;
+        background:rgb(7,11,19);z-index:19;pointer-events:none}
+      .video-js .vjs-menu-button {background:rgb(32,184,116);border:0;border-radius:0}
+    ` });
+    const wakeFromBottom = async () => {
+      const player = page.locator('.video-js');
+      const bar = page.locator('.vjs-control-bar');
+      const viewport = page.viewportSize();
+      const move = (x, y) => page.mouse.move(x, y);
+      const opacity = () => bar.evaluate(node => Number(getComputedStyle(node).opacity));
+      const video = page.locator('video');
+      await move(20, viewport.height / 2);
+      await bar.waitFor({ state: 'visible' });
+      assert.equal(await opacity(), 1, 'paused controls stay visible away from both zones');
+      await video.evaluate(node => node.play());
+      await page.waitForFunction(() => !document.querySelector('video').paused &&
+        getComputedStyle(document.querySelector('.vjs-control-bar')).opacity === '0');
+      await video.evaluate(node => node.pause());
+      await waitForOpacity('1');
+      assert.equal(await opacity(), 1, 'pause reveals controls without moving the pointer');
+      // Even when the native player considers the user active, only the correct zone wakes.
+      const handle = await toggle.boundingBox();
+      await move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+      await video.evaluate(node => node.play());
+      assert.ok(await toggle.evaluate(node => node.classList.contains('iwp-near-edge')));
+      assert.equal(await opacity(), 0);
+      if (await toggle.getAttribute('aria-expanded') === 'true') {
+        const sidebar = await page.locator('.playlist').boundingBox();
+        await move(sidebar.x + 4, viewport.height - 3);
+        assert.equal(await opacity(), 0);
+        await move(sidebar.x - 4, viewport.height - 3);
+        assert.equal(await opacity(), 1);
+        await move(sidebar.x + 4, viewport.height - 3);
+        assert.equal(await opacity(), 0);
+      }
+      await player.evaluate(node => node.classList.add('vjs-user-inactive'));
+      await page.mouse.move(20, viewport.height / 2);
+      await bar.waitFor({ state: 'hidden' });
+      const settings = bar.getByRole('button', { name: 'Settings' });
+      const checkPaint = async () => {
+        // Hit-testing alone also succeeds behind a painted, pointer-transparent layer.
+        const button = await settings.boundingBox();
+        const sample = await page.screenshot({ clip: { x: Math.ceil(button.x + 2), y: Math.ceil(button.y + 2), width: 1, height: 1 }, scale: 'css' });
+        const pixel = await page.evaluate(async encoded => {
+          const image = new Image();
+          image.src = 'data:image/png;base64,' + encoded;
+          await image.decode();
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          context.drawImage(image, 0, 0);
+          return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+        }, sample.toString('base64'));
+        assert.deepEqual(pixel, [32, 184, 116], 'the settings button must actually be painted');
+      };
+      // Move straight to each hidden control without crossing the progress slider.
+      // An overlay may consume motion above the player's own listener.
+      await page.evaluate(() => {
+        document.addEventListener('pointermove', event => {
+          if (document.fullscreenElement && event.clientY > innerHeight - 50)
+            event.stopPropagation();
+        }, { capture: true, signal: (window.motionGuard = new AbortController()).signal });
+      });
+      for (const selector of ['.vjs-mute-control', '.vjs-menu-button', '.iwp-theatre-toggle', '.vjs-fullscreen-control']) {
+        const control = bar.locator(selector);
+        const center = await control.evaluate(node => {
+          const rect = node.getBoundingClientRect();
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        });
+        await page.mouse.move(center.x, center.y);
+        await bar.waitFor({ state: 'visible', timeout: 3000 });
+        assert.ok(await control.evaluate(node => {
+          const rect = node.getBoundingClientRect();
+          return node.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+        }), selector);
+        await checkPaint();
+        await page.mouse.move(center.x, viewport.height / 2);
+        await bar.waitFor({ state: 'hidden' });
+      }
+      await page.evaluate(() => window.motionGuard.abort());
+      await page.mouse.move(20, viewport.height - 50);
+      await bar.evaluate(node => {
+        node.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, clientX: 20, clientY: innerHeight - 50, relatedTarget: null }));
+      });
+      assert.equal(await opacity(), 1, 'retargeting a stationary pointer must not hide the controls');
+      await bar.evaluate(node => node.hidePopover());
+      await page.waitForFunction(() => document.querySelector('.vjs-control-bar').matches(':popover-open'));
+      await page.evaluate(() => new Promise((resolve, reject) => {
+        const bar = document.querySelector('.vjs-control-bar'), start = performance.now();
+        function check() {
+          if (!bar.matches(':popover-open') || getComputedStyle(bar).opacity !== '1') return reject(Error('controls flickered during hover'));
+          if (performance.now() - start >= 5000) resolve();
+          else requestAnimationFrame(check);
+        }
+        check();
+      }));
+      assert.equal(await opacity(), 1, 'hovering in the bottom zone keeps the controls visible');
+      await page.mouse.move(20, viewport.height - 3);
+      await bar.waitFor({ state: 'visible', timeout: 3000 });
+      const rect = await bar.boundingBox();
+      assert.ok(Math.abs(rect.y + rect.height - viewport.height) <= 1);
+      await checkPaint();
+      await settings.click();
+      await bar.getByRole('button', { name: 'Source' }).click();
+      await settings.click();
+      await page.mouse.move(20, viewport.height / 2);
+      await bar.waitFor({ state: 'hidden' });
+      await player.evaluate(node => node.classList.remove('vjs-user-inactive'));
+      await video.evaluate(node => node.pause());
+    };
     await page.locator('.video-js').evaluate(node => node.requestFullscreen());
+    await wakeFromBottom();
     await toggle.click();
     const panel = page.locator('.playlist');
     await page.waitForFunction(() => document.fullscreenElement?.contains(document.querySelector('.iwp-fullscreen-list')));
@@ -164,9 +301,42 @@ test('browser: playlist controls cross page boundaries and reveal a collapsed qu
     }), true);
     const side = await panel.boundingBox(), handle = await toggle.boundingBox();
     assert.ok(Math.abs(handle.x + handle.width - side.x) < 1);
+    const checkFullscreenControls = async () => {
+      const bar = page.locator('.vjs-control-bar');
+      const settings = bar.getByRole('button', { name: 'Settings' });
+      const target = await settings.boundingBox();
+      await page.mouse.move(target.x + target.width / 2, page.viewportSize().height / 2);
+      await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2);
+      await page.locator('.iwp-controls-awake').waitFor({ timeout: 3000 });
+      await settings.click();
+      await bar.getByRole('button', { name: 'Source' }).click();
+      await settings.click();
+      const theatre = bar.locator('.iwp-theatre-toggle');
+      const pressed = await theatre.getAttribute('aria-pressed');
+      await theatre.click();
+      assert.notEqual(await theatre.getAttribute('aria-pressed'), pressed);
+      await theatre.click();
+      const controls = await bar.boundingBox(), sidebar = await panel.boundingBox();
+      const video = await page.locator('video').boundingBox();
+      assert.ok(Math.abs(sidebar.x - controls.x - controls.width) < 1);
+      assert.ok(Math.abs(video.x - controls.x) < 1 && Math.abs(video.width - controls.width) < 1);
+      assert.ok(Math.abs(sidebar.y + sidebar.height - controls.y - controls.height) < 1);
+    };
+    await checkFullscreenControls();
+    await wakeFromBottom();
+    await page.mouse.move(20, page.viewportSize().height - 3);
+    await page.locator('.vjs-fullscreen-control').click();
+    await page.waitForFunction(() => !document.fullscreenElement);
+    await page.locator('.videoPlayer').evaluate(node => node.requestFullscreen());
+    await page.locator('.iwp-fullscreen-list').waitFor();
+    await checkFullscreenControls();
+    await wakeFromBottom();
     await toggle.click();
+    await wakeFromBottom();
     await toggle.click();
-    await page.evaluate(() => document.exitFullscreen());
+    await page.mouse.move(20, page.viewportSize().height - 3);
+    await page.locator('.vjs-fullscreen-control').click();
+    await page.waitForFunction(() => !document.fullscreenElement);
     await page.locator('.page-video__player > .playlist:visible').waitFor();
     await toggle.click();
     await page.locator('.iwp-queue-nav a:last-child[href]').click();
@@ -229,6 +399,153 @@ test('browser: playlist controls cross page boundaries and reveal a collapsed qu
     await page.waitForURL('**/video/four?playlist=list');
     await mode.click();
     assert.equal(await mode.getAttribute('title'), initialModeLabel);
+  } finally { await browser.close(); }
+});
+test('playlist refresh follows video IDs across unordered pages and retries a pending random draw', async () => {
+  const browser = await chromium.launch({ channel: 'chrome' });
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript({ content: script });
+    let ids = ['old', 'b', 'c', 'd', 'current', 'f', 'g', 'h', 'i', 'j', 'k', 'l'];
+    let holdPage;
+    const html = fixture.replace('</div>\n<div class="page-video__details">',
+      '<div class="playlist"><div class="playlist__header"><div class="playlist__header__about"><span class="text">12 videos</span></div></div>' +
+      '<div class="playlist__items"><a class="playlist__item" href="/video/old"><div class="playlist__item__info"><b>Same title</b></div></a></div></div></div>\n<div class="page-video__details">');
+    await page.route('**/*', async route => {
+      const url = new URL(route.request().url());
+      if (url.hostname === 'i.iwara.tv') return route.fulfill({ status: 204 });
+      if (url.hostname !== 'api.iwara.tv') return route.fulfill({ contentType: 'text/html', body: html });
+      if (url.pathname.startsWith('/video/')) return route.fulfill({ json: { createdAt: '2025-01-01' } });
+      const n = Number(url.searchParams.get('page'));
+      const results = ids.slice(n * 2, n * 2 + 2).map(id => ({
+        id, title: 'Same title', file: { id }, user: { name: id }, createdAt: id === 'current' ? '2025-01-01' : '2026-01-01'
+      }));
+      if (n === 3 && holdPage) { const hold = holdPage; holdPage = null; await hold(); }
+      await route.fulfill({ json: { page: n, limit: 2, count: ids.length, results } });
+    });
+    await page.goto('https://www.iwara.tv/video/current?playlist=list');
+    const list = page.locator('.playlist__items');
+    const mode = page.locator('.iwp-order');
+    const next = page.locator('.iwp-queue-nav a:last-child');
+    const row = id => list.locator('a[href*="/video/' + id + '?"]:visible');
+    const refresh = () => list.dispatchEvent('wheel', { deltaY: -120 });
+    const more = () => list.dispatchEvent('wheel', { deltaY: 120 });
+    await page.getByText('5/12 videos', { exact: true }).waitFor();
+    ids[0] = 'replacement';
+    await refresh();
+    await row('replacement').waitFor();
+    assert.match(await row('replacement').locator('img').getAttribute('src'), /thumbnail\/replacement\//);
+    assert.equal(await list.locator('a[href="/video/old"]:visible').count(), 0);
+    await more();
+    await row('c').waitFor();
+    await page.waitForTimeout(1050); // Allow another intentional top refresh.
+    ids.splice(2, 4, 'new-c', 'd', 'f', 'current');
+    await refresh();
+    await page.getByText('6/12 videos', { exact: true }).waitFor();
+    assert.match(await next.getAttribute('href'), /\/g\?/);
+    await more();
+    await row('new-c').waitFor();
+    await mode.click();
+    await row('l').waitFor();
+    await more();
+    await row('j').waitFor();
+    await more();
+    await row('g').waitFor();
+    ids[6] = 'new-g';
+    await refresh();
+    await page.waitForFunction(() => !document.querySelector('.playlist__items a[href*="/video/g?"]'));
+    await more();
+    await row('j').waitFor();
+    await more();
+    await row('new-g').waitFor();
+    await mode.click();
+    await page.reload();
+    const random = page.locator('.iwp-queue-nav button:last-child:enabled');
+    await random.waitFor();
+    let release, started;
+    const waiting = new Promise(resolve => { started = resolve; });
+    holdPage = () => new Promise(resolve => { release = resolve; started(); });
+    await page.evaluate(() => { Math.random = () => 0.5; });
+    await random.click();
+    await waiting;
+    ids.splice(4, 3, 'current', 'f', 'fresh-target');
+    await refresh();
+    await page.getByText('5/12 videos', { exact: true }).waitFor();
+    release();
+    await page.waitForURL('**/video/fresh-target?playlist=list');
+  } finally { await browser.close(); }
+});
+test('large playlists defer lookup, throttle reverse initialization and finish pending navigation in fullscreen', async () => {
+  const browser = await chromium.launch({ channel: 'chrome' });
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      history.replaceState({ idx: 0 }, '');
+      window.addEventListener('popstate', () => {
+        document.querySelector('.page-video__details h1').textContent = location.pathname;
+      });
+    });
+    await page.addInitScript({ content: script });
+    const html = fixture.replace('</div>\n<div class="page-video__details">',
+      '<div class="playlist"><div class="playlist__header"><div class="playlist__header__about"><span class="text">100 videos</span></div></div>' +
+      '<div class="playlist__items"><div class="playlist__item">Forward only</div></div></div></div>\n<div class="page-video__details">');
+    const requests = [];
+    let documents = 0, failTail = false, resume, notifyBlocked;
+    const blocked = new Promise(resolve => { notifyBlocked = resolve; });
+    await page.route('**/*', async route => {
+      const url = new URL(route.request().url());
+      if (url.hostname !== 'api.iwara.tv') {
+        if (route.request().isNavigationRequest()) documents++;
+        return route.fulfill({ contentType: 'text/html', body: html });
+      }
+      if (url.pathname.startsWith('/video/')) return route.fulfill({ json: {} });
+      const n = Number(url.searchParams.get('page'));
+      requests.push(n);
+      if (n === 49 && failTail) return route.fulfill({ status: 503 });
+      if (n === 18) await new Promise(resolve => { resume = resolve; notifyBlocked(); });
+      return route.fulfill({ json: { page: n, limit: 2, count: 100,
+        results: [2*n, 2*n+1].map(i => ({ id: 'v'+i, title: 'Video '+i })) } });
+    });
+    await page.goto('https://www.iwara.tv/video/v99?playlist=big');
+    await page.getByText('100/100 videos').waitFor();
+    assert.deepEqual(requests, [0, 49]);
+    requests.length = 0;
+    await page.goto('https://www.iwara.tv/video/v73?playlist=big');
+    await page.locator('.iwp-queue-nav [role="button"]').first().waitFor();
+    assert.deepEqual(requests, [0, 49]);
+    await page.locator('.iwp-order').click();
+    const list = page.locator('.playlist__items');
+    await list.getByText('Video 99').waitFor();
+    failTail = true;
+    // Reopen directly in reverse order, without a cached last page.
+    await page.reload();
+    const status = page.locator('.playlist [role="status"]');
+    await status.getByText(/failed|重试/i).waitFor();
+    assert.equal(await list.getByText('Forward only').isVisible(), false);
+    const attempts = requests.length;
+    for (let i = 0; i < 6; i++) await list.dispatchEvent('wheel', { deltaY: i % 2 ? -90 : 90 });
+    assert.equal(requests.length, attempts);
+    failTail = false;
+    await page.waitForTimeout(1550);
+    await list.dispatchEvent('wheel', { deltaY: 90 });
+    await list.getByText('Video 99').waitFor();
+    await page.locator('.video-js').evaluate(node => node.requestFullscreen());
+    const before = documents;
+    await page.locator('video').dispatchEvent('ended');
+    await blocked;
+    assert.ok(page.url().includes('/video/v73'));
+    resume();
+    await page.waitForURL('**/video/v72?playlist=big');
+    await page.getByRole('heading', { name: '/video/v72' }).waitFor();
+    await list.getByRole('link', { name: 'Video 99' }).click();
+    await page.getByRole('heading', { name: '/video/v99' }).waitFor();
+    await page.locator('.iwp-order').click();
+    await page.evaluate(() => { Math.random = () => 0; });
+    await page.mouse.move(20, page.viewportSize().height - 3);
+    await page.locator('.iwp-queue-nav button:last-child:enabled').click();
+    await page.getByRole('heading', { name: '/video/v0' }).waitFor();
+    assert.equal(documents, before);
+    assert.equal(await page.evaluate(() => !!document.fullscreenElement), true);
   } finally { await browser.close(); }
 });
 test('wrapped details leave space between the player and the first action button', async () => {

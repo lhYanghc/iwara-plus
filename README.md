@@ -13,13 +13,14 @@ The runtime has no jQuery, Webpack Hacks, or remotely loaded code dependencies. 
 1. Install a userscript manager such as Tampermonkey in Chrome.
 2. Disable the original **Neko0 Iwara enhancements** and **Theatre for iwara** scripts to avoid duplicate actions and layout conflicts. Keep them if you want an easy rollback.
 3. Use one of the installation links above and confirm installation in your userscript manager.
-4. Reload an Iwara video page. The theatre switch appears on the player control bar, before the fullscreen button. The centered chevron below the native action row expands the extra tools.
+4. Reload a video page on `iwara.tv` or `iwara.ai`. The player control bar includes theatre and web fullscreen switches before the native fullscreen button. The centered chevron below the native action row expands the extra tools.
 
 You can also import `iwara-plus.user.js` as a local file, or paste its full contents into a new userscript. GitHub installations use the repository's metadata file for update checks; Sleazy Fork provides its own installation and update endpoint.
 
 ## Features
 
 - **Responsive theatre mode:** enabled by default, remembers your preference, follows the available content width, and adapts when the left navigation opens or the window narrows. The original details and right sidebar remain below the player.
+- **Web fullscreen:** fills the browser viewport and shows playback and buffering progress when the controls are hidden. Use the switch or **Esc** to exit. The playlist sidebar can be toggled, and switching videos within the same playlist keeps web fullscreen active.
 - **Native site styling:** original action buttons, light/dark theme support, and an Iwara icon in the userscript manager. A recognized active Like button turns red and returns to its normal style when unliked.
 - **A compact, collapsible panel:** starts closed on each video. Tools unfold downwards with a scroll-like reveal; the divider and centered chevron move with the lower edge. The chevron flips vertically after most of the reveal finishes. Reduced-motion preferences are respected.
 - **Five filename choices:** each option shows the actual name that will be copied, based on the current title, author, and upload date, with Windows-invalid characters removed. There is no duplicate filename outside the selector.

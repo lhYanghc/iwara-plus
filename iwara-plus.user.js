@@ -3,7 +3,7 @@
 // @name:zh-CN   Iwara Plus — 增强与影院融合版
 // @name:ja      Iwara Plus — 拡張機能とシアターモード
 // @namespace    iwara-plus
-// @version      1.0.15
+// @version      1.1.0
 // @author       lhYanghc
 // @homepageURL  https://github.com/lhYanghc/iwara-plus
 // @supportURL   https://github.com/lhYanghc/iwara-plus/issues
@@ -15,6 +15,8 @@
 // @description:ja ファイル名のコピー、元画質のダウンロード、画質情報の表示とシアターモード。
 // @match        https://www.iwara.tv/*
 // @match        https://iwara.tv/*
+// @match        https://www.iwara.ai/*
+// @match        https://iwara.ai/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_setClipboard
@@ -37,6 +39,8 @@
     try { return GM_getValue(key, fallback); } catch { return fallback; }
   };
   const translations = {
+    '网页全屏': { en: 'Web fullscreen', ja: 'ページ内全画面' },
+    '退出网页全屏': { en: 'Exit web fullscreen', ja: 'ページ内全画面を終了' },
     '顺序播放': { en: 'Play in order', ja: '順番に再生' },
     '倒序播放': { en: 'Play in reverse', ja: '逆順再生' },
     '随机播放': { en: 'Shuffle', ja: 'シャッフル再生' },
@@ -173,6 +177,41 @@
     .video-js .iwp-queue-nav [aria-disabled="true"] {color:#85898e;cursor:default}
     .page-video__player:has(.iwp-queue-toggle) {position:relative;column-gap:0}
     .page-video__player > .videoPlayer:has(~ .playlist) {position:relative;min-width:0}
+    html:has(.iwp-web-fullscreen),body:has(.iwp-web-fullscreen) {overflow:hidden!important}
+    .iwp-theatre-stage:has(> .iwp-web-fullscreen) {container-type:normal}
+    .page-video__player.iwp-web-fullscreen:not(:fullscreen):not(:has(:fullscreen)) {
+      position:fixed!important;inset:0;z-index:2147483647;display:block!important;
+      width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;
+      margin:0!important;padding:0;background:#000}
+    .iwp-web-fullscreen:not(:fullscreen,:has(:fullscreen)):has(> .playlist):has(> .iwp-queue-toggle[aria-expanded="true"]) {
+      --iwp-list-width:min(34%,380px);display:flex!important;flex-flow:row nowrap;align-items:stretch;gap:0}
+    .iwp-web-fullscreen .iwp-theatre-toggle,
+    :fullscreen :is(.iwp-theatre-toggle,.iwp-web-fullscreen-toggle) {display:none!important}
+    .iwp-web-fullscreen:not(:fullscreen):not(:has(:fullscreen)) :is(.videoPlayer,.videoPlayer > div:has(> .video-js),.video-js) {
+      height:100%!important;max-width:none!important;max-height:none!important}
+    .iwp-web-fullscreen:not(:fullscreen,:has(:fullscreen)) :is(.videoPlayer > div:has(> .video-js),.video-js) {width:100%!important}
+    .iwp-web-fullscreen:not(:fullscreen,:has(:fullscreen)) > .videoPlayer {
+      flex:none;width:calc(100% - var(--iwp-list-width,0px))!important;min-width:0}
+    .iwp-web-fullscreen:not(:fullscreen,:has(:fullscreen)):has(> .iwp-queue-toggle[aria-expanded="true"]) > .playlist {
+      position:relative;display:flex;flex:none;flex-direction:column;box-sizing:border-box;
+      width:var(--iwp-list-width);min-width:0;max-width:none;height:auto;max-height:none;min-height:0;margin:0;
+      background:var(--background,#202126)}
+    .iwp-web-fullscreen:not(:fullscreen,:has(:fullscreen)) > .playlist > .playlist__items {min-height:0;overflow-y:auto}
+    .iwp-web-fullscreen:not(:fullscreen):not(:has(:fullscreen)) .video-js {position:relative;padding:0!important}
+    .iwp-web-fullscreen:not(:fullscreen):not(:has(:fullscreen)) video.vjs-tech {
+      position:absolute;inset:0;width:100%;height:100%;max-height:none;object-fit:contain;object-position:center}
+    .iwp-web-fullscreen:not(:fullscreen):not(:has(:fullscreen)) .vjs-control-bar {
+      position:absolute;inset:auto 0 0;width:100%;box-sizing:border-box;z-index:19}
+    .iwp-web-fullscreen:not(:fullscreen):not(:has(:fullscreen)) .vjs-control-bar:not(.iwp-controls-awake) {
+      opacity:0!important;pointer-events:none!important;transition:none!important}
+    .iwp-web-fullscreen:not(:fullscreen):not(:has(:fullscreen)) .video-js:not(.vjs-controls-disabled) .iwp-controls-awake {
+      display:flex!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;transition:none!important}
+    .iwp-web-progress {display:none;position:absolute;inset:auto var(--iwp-list-width,0px) 0 0;height:3px;z-index:18;
+      pointer-events:none;background:var(--iwp-track,rgba(255,255,255,.2))}
+    .iwp-web-fullscreen:not(:fullscreen):not(:has(:fullscreen,.iwp-controls-awake,.vjs-controls-disabled))
+      > .iwp-web-progress[data-playing="true"] {display:block}
+    .iwp-web-progress > span {position:absolute;inset-block:0;background:var(--iwp-buffer,rgba(255,255,255,.45))}
+    .iwp-web-progress > .iwp-web-played {left:0;background:var(--iwp-played,#fff)}
     :is(.videoPlayer,.video-js):fullscreen .vjs-control-bar {position:fixed;inset:auto 0 0;width:100%;box-sizing:border-box}
     /* Video.js sets user-active on movement anywhere, including inside the list. */
     :is(.page-video__player:fullscreen,.page-video__player :fullscreen) .vjs-control-bar:not(.iwp-controls-awake):not(:has(:focus-visible)) {
@@ -218,7 +257,7 @@
     .iwp-order:is(:hover,:focus-visible) {color:#f45b8e}
     .iwp-order:is(:hover,:focus-visible)::after {content:attr(aria-label);position:absolute;z-index:12;top:100%;right:0;
       background:#17181b;color:#fff;padding:5px 8px;border-radius:4px;font-size:12px;white-space:nowrap;pointer-events:none}
-    .video-js .iwp-autoplay,.video-js .iwp-theatre-toggle {display:grid;place-items:center;padding:0;cursor:pointer}
+    .video-js :is(.iwp-autoplay,.iwp-theatre-toggle,.iwp-web-fullscreen-toggle) {display:grid;place-items:center;padding:0;cursor:pointer}
     .video-js .iwp-autoplay {width:40px}
     .iwp-autoplay .iwp-switch-track {display:block;width:34px;height:18px;fill:#535961;stroke:#70767b}
     .iwp-autoplay[aria-pressed="true"] .iwp-switch-track {fill:#81cba6;stroke:#a1ddbe}
@@ -228,11 +267,14 @@
     .iwp-autoplay[aria-pressed="true"] .iwp-switch-thumb {transform:translateX(16px)}
     .iwp-autoplay[aria-pressed="false"] .iwp-play-mark,.iwp-autoplay[aria-pressed="true"] .iwp-pause-mark {display:none}
     .iwp-autoplay:focus-visible {outline:2px solid currentColor;outline-offset:-2px}
-    .iwp-theatre-toggle svg {display:block;width:21px;height:21px}
+    :is(.iwp-theatre-toggle,.iwp-web-fullscreen-toggle) svg {display:block;width:21px;height:21px}
+    :is(.iwp-theatre-toggle,.iwp-web-fullscreen-toggle)[aria-pressed="true"] .iwp-mode-enter,
+    :is(.iwp-theatre-toggle,.iwp-web-fullscreen-toggle)[aria-pressed="false"] .iwp-mode-exit {display:none}
     @media(prefers-reduced-motion:reduce){.iwp-switch-thumb{transition:none}}
   `;
 
   let current = null;
+  let webPlaylist = null;
   let queued = false;
   let suspended = false;
   const videoId = () => location.pathname.match(/^\/video\/([^/]+)/)?.[1] || null;
@@ -261,6 +303,12 @@
     if (video && !video.paused) blockStartup = false;
   }
   for (const type of ['keydown', 'keyup']) window.addEventListener(type, observeNativePlayback);
+  function focusPlayback(video) {
+    const target = video?.closest('.video-js') || video;
+    if (!target?.isConnected) return;
+    if (!target.hasAttribute('tabindex')) target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+  }
   function handlePlayerInput(event) {
     if (!event.isTrusted || !syncPlaybackRoute()) return;
     const target = event.target;
@@ -296,9 +344,7 @@
     // A spinner or poster click is consumed here, so Video.js never receives
     // its usual opportunity to take keyboard focus. Focus during the gesture
     // so a later buffering callback cannot steal focus from another field.
-    const keyboardTarget = video.closest('.video-js') || video;
-    if (!keyboardTarget.hasAttribute('tabindex')) keyboardTarget.tabIndex = -1;
-    keyboardTarget.focus({ preventScroll: true });
+    focusPlayback(video);
     // Give a second click time to claim the gesture before toggling playback.
     const id = playbackId;
     surfaceClick = setTimeout(() => {
@@ -419,6 +465,100 @@
     settings.theatre = !settings.theatre;
     save();
     theatre(ctx);
+  }
+  function updateWebProgress(ctx) {
+    if (!ctx.webFullscreen) return;
+    const { video, webProgress: line } = ctx;
+    const duration = video?.duration;
+    const hasDuration = Number.isFinite(duration) && duration > 0;
+    line.dataset.playing = String(hasDuration && !video.paused && !video.ended);
+    const played = line.lastElementChild;
+    const percent = time => Math.max(0, Math.min(100, 100 * time / duration));
+    const buffered = hasDuration ? video.buffered : null;
+    const count = buffered?.length || 0;
+    for (let i = 0; i < count; i++) {
+      let range = line.children[i];
+      if (range === played) {
+        range = element('span');
+        line.insertBefore(range, played);
+      }
+      const start = percent(buffered.start(i));
+      range.style.left = start + '%';
+      range.style.width = (percent(buffered.end(i)) - start) + '%';
+    }
+    while (line.children.length > count + 1) played.previousElementSibling.remove();
+    played.style.width = (hasDuration ? percent(video.currentTime) : 0) + '%';
+  }
+  function syncWebProgressColors(ctx, bar) {
+    if (!ctx.webFullscreen || !bar) return;
+    for (const [property, selector] of [
+      ['--iwp-track', '.vjs-progress-holder'],
+      ['--iwp-buffer', '.vjs-load-progress'],
+      ['--iwp-played', '.vjs-play-progress'],
+    ]) {
+      const part = $(selector, bar);
+      const color = part && getComputedStyle(part).backgroundColor;
+      if (color && color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)')
+        ctx.webProgress.style.setProperty(property, color);
+      else ctx.webProgress.style.removeProperty(property);
+    }
+  }
+  function setWebFullscreen(ctx, active) {
+    if (active === Boolean(ctx.webFullscreen)) return;
+    if (active) {
+      ctx.webScroll = webPlaylist?.id === ctx.playlist ? webPlaylist.scroll : { left: scrollX, top: scrollY, behavior: 'instant' };
+      if (ctx.playlist) webPlaylist = { id: ctx.playlist, scroll: ctx.webScroll };
+    } else webPlaylist = null;
+    ctx.webFullscreen = active;
+    ctx.player.classList.toggle('iwp-web-fullscreen', active);
+    ctx.webControl.setAttribute('aria-pressed', String(active));
+    localize(ctx.webControl, 'title', active ? '退出网页全屏' : '网页全屏');
+    if (active) {
+      syncWebProgressColors(ctx, $('.vjs-control-bar', ctx.player));
+      updateWebProgress(ctx);
+    } else if (ctx.id === videoId() && ctx.player.isConnected) {
+      window.scrollTo(ctx.webScroll);
+    }
+    ctx.updateControls();
+    schedule();
+  }
+  function screenModeIcon(enter, exit) {
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="1.5" y="5.5" width="21" height="13" rx=".5"/>
+      <path class="iwp-mode-enter" d="${enter}"/>
+      <path class="iwp-mode-exit" d="${exit}"/>
+    </svg>`;
+  }
+  function createWebFullscreen(ctx) {
+    const button = element('button', '', { type: 'button', class: 'vjs-control vjs-button iwp-web-fullscreen-toggle',
+      title: '网页全屏', 'aria-label': '网页全屏', 'aria-pressed': 'false' });
+    button.innerHTML = screenModeIcon(
+      'M4.25 10.75V8.25h3.5 M16.25 8.25h3.5v2.5 M4.25 13.25v2.5h3.5 M16.25 15.75h3.5v-2.5',
+      'M4.25 10.75h3.5v-2.5 M16.25 8.25v2.5h3.5 M4.25 13.25h3.5v2.5 M16.25 15.75v-2.5h3.5',
+    );
+    button.addEventListener('click', event => {
+      setWebFullscreen(ctx, !ctx.webFullscreen);
+      if (event.isTrusted) focusPlayback(ctx.video);
+    });
+    ctx.webControl = button;
+    const line = element('div', '', { class: 'iwp-web-progress', 'aria-hidden': 'true' });
+    line.append(element('span', '', { class: 'iwp-web-played' }));
+    ctx.player.append(line);
+    ctx.webProgress = line;
+    const options = { capture: true, signal: ctx.abort.signal };
+    for (const type of ['loadedmetadata', 'durationchange', 'timeupdate', 'progress', 'seeking', 'play', 'pause', 'ended', 'emptied']) {
+      ctx.player.addEventListener(type, event => {
+        if (event.target === ctx.video) updateWebProgress(ctx);
+      }, options);
+    }
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || event.defaultPrevented || document.fullscreenElement || !ctx.webFullscreen) return;
+      const focused = document.activeElement;
+      event.preventDefault();
+      setWebFullscreen(ctx, false);
+      if (focused === document.body || ctx.player.contains(focused)) focusPlayback(ctx.video);
+    }, { signal: ctx.abort.signal });
   }
   function downloadLink() {
     return all('#iwp-toolbar a, .page-video__bottom a, .page-video__details a, .dropdown__content a').find(a => /^source(?:\b|$)/i.test(a.textContent.trim()) && /^https?:/.test(a.href));
@@ -858,10 +998,11 @@
         localize(toggle, 'ariaLabel', label);
         localize(toggle, 'title', label);
       };
-      toggle.onclick = () => {
+      toggle.onclick = event => {
         collapsed = !collapsed;
         try { sessionStorage.setItem(storageKey, collapsed ? '1' : '0'); } catch {}
         refresh();
+        if (ctx.webFullscreen && !document.fullscreenElement && event.isTrusted && event.detail > 0) focusPlayback(ctx.video);
         schedule();
       };
       let hideTimer;
@@ -1045,13 +1186,28 @@
     const number = $('.iwp-native-stats .stats__number', ctx.data);
     if (number && ctx.quality.className !== number.className) ctx.quality.className = number.className;
     const video = $('video', ctx.player);
-    if (video && ctx.video !== video) attachVideo(ctx, video);
+    if (ctx.video !== video) {
+      if (video) attachVideo(ctx, video);
+      else {
+        ctx.videoCleanup?.();
+        ctx.video = null;
+        ctx.videoCleanup = null;
+        ctx.updateQuality = null;
+      }
+      updateWebProgress(ctx);
+    }
     const bar = $('.vjs-control-bar', ctx.player);
     if (ctx.playlist) playlistControls(ctx, bar);
     if (bar && !ctx.control?.isConnected) {
       ctx.control = element('button', '', { type: 'button', class: 'vjs-control vjs-button iwp-theatre-toggle', title: settings.theatre ? '退出影院模式' : '进入影院模式', 'aria-label': '切换影院模式', 'aria-pressed': String(settings.theatre) });
-      ctx.control.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
-      ctx.control.addEventListener('click', () => toggle(ctx));
+      ctx.control.innerHTML = screenModeIcon(
+        'M7.75 10l-3.25 2 3.25 2 M16.25 10l3.25 2-3.25 2',
+        'M4.5 10l3.25 2-3.25 2 M19.5 10l-3.25 2 3.25 2',
+      );
+      ctx.control.addEventListener('click', event => {
+        toggle(ctx);
+        if (event.isTrusted) focusPlayback(ctx.video);
+      });
     }
     if (bar && !ctx.autoplayControl?.isConnected) {
       const button = element('button', '', { type: 'button', class: 'vjs-control vjs-button iwp-autoplay', 'aria-label': '自动播放' });
@@ -1075,17 +1231,23 @@
       refresh();
     }
     if (bar) {
+      if (!ctx.webControl) createWebFullscreen(ctx);
+      if (ctx.webProgress.parentNode !== ctx.player) ctx.player.append(ctx.webProgress);
       // Video.js plugins may wrap controls or insert them after the bar mounts.
       const slot = selector => $(`:scope > :is(${selector}), :scope > :has(${selector})`, bar);
       const fullscreen = slot('.vjs-fullscreen-control');
-      if (ctx.control.parentNode !== bar || ctx.control.nextElementSibling !== fullscreen)
-        bar.insertBefore(ctx.control, fullscreen);
+      if (ctx.webControl.parentNode !== bar || ctx.webControl.nextElementSibling !== fullscreen)
+        bar.insertBefore(ctx.webControl, fullscreen);
+      if (ctx.control.parentNode !== bar || ctx.control.nextElementSibling !== ctx.webControl)
+        bar.insertBefore(ctx.control, ctx.webControl);
       const pip = slot('.vjs-picture-in-picture-control');
       const time = pip ? null : slot('.vjs-remaining-time') || slot('.vjs-duration') || slot('.vjs-current-time');
       const anchor = pip || (time ? time.nextElementSibling : ctx.control);
       if (anchor !== ctx.autoplayControl &&
           (ctx.autoplayControl.parentNode !== bar || ctx.autoplayControl.nextElementSibling !== anchor))
         bar.insertBefore(ctx.autoplayControl, anchor);
+      if (!ctx.webFullscreen && webPlaylist?.id === ctx.playlist) setWebFullscreen(ctx, true);
+      syncWebProgressColors(ctx, bar);
     }
     ctx.updateControls();
     const source = $('.vjs-menu-item.resolution-Source', ctx.player);
@@ -1115,6 +1277,9 @@
     }
     old.toolbar.remove();
     old.control?.remove();
+    old.player.classList.remove('iwp-web-fullscreen');
+    old.webControl?.remove();
+    old.webProgress?.remove();
     old.autoplayControl?.remove();
     old.queueNav?.remove();
     old.clearQueueList?.();
@@ -1138,7 +1303,9 @@
     };
     ctx.updateControls = () => {
       ctx.updateQueuePlayback?.();
-      const host = document.fullscreenElement;
+      const fullscreen = document.fullscreenElement;
+      const web = !fullscreen && ctx.webFullscreen;
+      const host = web ? ctx.player : fullscreen;
       const video = ctx.video;
       const root = video?.closest('.video-js');
       const bar = root && $('.vjs-control-bar', root);
@@ -1168,12 +1335,12 @@
           return;
         }
       }
-      if (awakeBar !== bar || awakeHost !== host) reset();
+      if (awakeBar !== bar || awakeHost !== host || (web && ownsPopover)) reset();
       const waking = awakeBar !== bar;
       awakeBar = bar;
       awakeHost = host;
       bar.classList.add('iwp-controls-awake');
-      if (bar.showPopover && !bar.hasAttribute('popover')) {
+      if (!web && bar.showPopover && !bar.hasAttribute('popover')) {
         bar.setAttribute('popover', 'manual');
         ownsPopover = true;
       }
@@ -1196,6 +1363,8 @@
           event.clientX >= innerWidth || event.clientY >= innerHeight)) forget();
     }, options);
     window.addEventListener('blur', forget, { signal: ctx.abort.signal });
+    ctx.player.addEventListener('focusin', ctx.updateControls, options);
+    ctx.player.addEventListener('focusout', schedule, options);
     for (const type of ['playing', 'play', 'pause', 'ended', 'emptied'])
       ctx.player.addEventListener(type, ctx.updateControls, options);
     document.addEventListener('fullscreenchange', ctx.updateControls, options);
@@ -1330,6 +1499,7 @@
     const player = $('.page-video__player');
     const details = $('.page-video__details');
     const playlist = new URLSearchParams(location.search).get('playlist');
+    if (!id || webPlaylist?.id !== playlist) webPlaylist = null;
     if (current && (current.id !== id || current.playlist !== playlist || current.details !== details || !current.player.isConnected || !current.toolbar.isConnected || (player && player !== current.player))) dispose();
     const video = player && $('video', player);
     if (id && video && (startupVideo !== video || (video.autoplay && blockStartup))) {
@@ -1356,6 +1526,7 @@
     suspended = true;
     cancelSurfaceClick();
     playbackId = null;
+    webPlaylist = null;
     observer.disconnect();
     clearInterval(routeTimer);
     dispose();

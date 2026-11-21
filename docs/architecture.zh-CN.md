@@ -8,7 +8,7 @@
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.15 运行结构
+title: Iwara Plus v1.1.0 运行结构
 ---
 classDiagram
     direction TB
@@ -26,17 +26,21 @@ classDiagram
         playlist
         abort
         meta
+        webFullscreen
     }
     class Playback["播放输入"] {
         syncPlaybackRoute()
         handlePlayerInput()
         holdPlayback()
+        focusPlayback()
     }
     class Player["播放器增强"] {
         theatre()
         restore()
         attachVideo()
         bindFullscreenControls()
+        setWebFullscreen()
+        updateWebProgress()
     }
     class Toolbar["工具栏操作"] {
         filename()
@@ -69,7 +73,7 @@ classDiagram
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.15 视频页生命周期
+title: Iwara Plus v1.1.0 视频页生命周期
 ---
 sequenceDiagram
     participant B as 浏览器与 Iwara 页面
@@ -101,11 +105,11 @@ sequenceDiagram
 
 ## 起播保护
 
-单击画面会将焦点交给播放器，500 毫秒后若仍是当前视频则切换播放。双击会取消待执行的单击操作并切换全屏。播放器获得焦点后，I 切换画中画，T 切换影院模式。自动播放开关保存下次打开视频时使用的偏好。
+单击画面会将焦点交给播放器，500 毫秒后若仍是当前视频则切换播放。双击会取消待执行的单击操作并切换原生全屏。影院和网页全屏按钮切换后将焦点交还播放器。播放器获得焦点后，I 切换画中画，T 切换影院模式。自动播放开关保存下次打开视频时使用的偏好。
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.15 起播保护
+title: Iwara Plus v1.1.0 起播保护
 ---
 stateDiagram-v2
     state "等待用户起播" as Guarded
@@ -126,7 +130,7 @@ stateDiagram-v2
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.15 工具栏一键操作
+title: Iwara Plus v1.1.0 工具栏一键操作
 ---
 sequenceDiagram
     actor U as 用户
@@ -152,11 +156,11 @@ sequenceDiagram
 
 ## 播放列表导航
 
-列表分页缓存在当前视频上下文中。倒序和随机模式在视频结束时等待所需分页就绪后切换下一项。侧栏按需加载分页以扩展列表。进入全屏时，已展开的面板可移入全屏元素，退出时按锚点归位。播放顺序与侧栏折叠状态保存在会话存储中。
+列表分页缓存在当前视频上下文中。倒序和随机模式在视频结束时等待所需分页就绪后切换下一项。侧栏按需加载分页。进入原生全屏时，展开的侧栏可移入全屏元素，退出时按锚点归位。网页全屏下侧栏与播放器并排，同一列表内切换视频时保留网页全屏。两个 Iwara 域名共用元数据和列表 API，生成的链接沿用当前域名。播放顺序与侧栏折叠状态保存在会话存储中。
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.15 播放列表导航
+title: Iwara Plus v1.1.0 播放列表导航
 ---
 sequenceDiagram
     participant C as 播放列表控件
@@ -188,11 +192,11 @@ sequenceDiagram
 
 ## 全屏控件显示
 
-侧栏展开时，底部感应区仅覆盖视频宽度。
+网页全屏铺满浏览器内容区，可再次点击按钮或按 Esc 退出。侧栏展开时，底部感应区和进度线仅覆盖视频宽度。
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.15 全屏控件显示
+title: Iwara Plus v1.1.0 全屏控件显示
 ---
 sequenceDiagram
     participant B as 浏览器
@@ -205,7 +209,10 @@ sequenceDiagram
             B->>P: 唤出或保持底部栏
         end
         opt 离开且控件无键盘焦点
-            B->>P: 恢复播放器自身的隐藏逻辑
+            B->>P: 隐藏底部栏
+            opt 网页全屏
+                P->>P: 显示播放进度和已缓存范围
+            end
         end
         opt 靠近列表收放按钮
             B->>S: 悬停期间保持显示，移开约 0.9 秒后淡出

@@ -3,7 +3,7 @@
 // @name:zh-CN   Iwara Plus — 增强与影院融合版
 // @name:ja      Iwara Plus — 拡張機能とシアターモード
 // @namespace    iwara-plus
-// @version      1.0.15
+// @version      1.1.0
 // @author       lhYanghc
 // @homepageURL  https://github.com/lhYanghc/iwara-plus
 // @supportURL   https://github.com/lhYanghc/iwara-plus/issues
@@ -15,6 +15,8 @@
 // @description:ja ファイル名のコピー、元画質のダウンロード、画質情報の表示とシアターモード。
 // @match        https://www.iwara.tv/*
 // @match        https://iwara.tv/*
+// @match        https://www.iwara.ai/*
+// @match        https://iwara.ai/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_setClipboard

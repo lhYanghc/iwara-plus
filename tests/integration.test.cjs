@@ -86,7 +86,8 @@ test('theatre restores exact player position and has one accessible control', as
     assert.equal(control.parentNode.className, 'vjs-control-bar');
     assert.equal(control.previousElementSibling.getAttribute('aria-label'), '自动播放');
     assert.equal(control.previousElementSibling.previousElementSibling.className, 'vjs-progress-control');
-    assert.equal(control.nextElementSibling.className, 'vjs-fullscreen-control');
+    assert.ok(control.nextElementSibling.classList.contains('iwp-web-fullscreen-toggle'));
+    assert.equal(control.nextElementSibling.nextElementSibling.className, 'vjs-fullscreen-control');
     assert.equal(w.document.querySelector('#iwp-toolbar .iwp-theatre-toggle'), null);
     assert.ok(control.querySelector('svg rect'));
     await click('退出影院');
@@ -187,6 +188,7 @@ test('replacing details and nesting the fullscreen button preserves working cont
     assert.equal(doc.querySelector('#iwp-toolbar .page-video__actions').textContent.includes('New actions'), true);
     assert.equal(replacement.previousElementSibling.id, 'iwp-toolbar');
     assert.equal(doc.querySelectorAll('.vjs-control-bar .iwp-theatre-toggle').length, 1);
+    assert.ok(doc.querySelector('.iwp-theatre-toggle + .iwp-web-fullscreen-toggle + span > .vjs-fullscreen-control'));
   } finally { w.dispatchEvent(new w.Event('pagehide')); w.close(); }
 });
 test('statistics arriving after the action row moved are also aligned and restored', async () => {

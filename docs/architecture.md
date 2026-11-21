@@ -8,7 +8,7 @@ The boxes group functions in the userscript by responsibility. The script holds 
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.15 Runtime structure
+title: Iwara Plus v1.1.0 Runtime structure
 ---
 classDiagram
     direction TB
@@ -26,17 +26,21 @@ classDiagram
         playlist
         abort
         meta
+        webFullscreen
     }
     class Playback["Playback input"] {
         syncPlaybackRoute()
         handlePlayerInput()
         holdPlayback()
+        focusPlayback()
     }
     class Player["Player enhancements"] {
         theatre()
         restore()
         attachVideo()
         bindFullscreenControls()
+        setWebFullscreen()
+        updateWebProgress()
     }
     class Toolbar["Toolbar actions"] {
         filename()
@@ -69,7 +73,7 @@ A change of video, playlist, details node or player container can trigger a remo
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.15 Video page lifecycle
+title: Iwara Plus v1.1.0 Video page lifecycle
 ---
 sequenceDiagram
     participant B as Browser and Iwara page
@@ -101,11 +105,11 @@ sequenceDiagram
 
 ## Playback startup guard
 
-A surface click focuses the player. After 500 ms it toggles playback if the video is still current. A double click cancels the pending toggle and switches fullscreen. With the player focused, I activates picture-in-picture and T toggles theatre mode. The autoplay switch saves the preference used on the next video.
+A surface click focuses the player. After 500 ms it toggles playback if the video is still current. A double click cancels the pending toggle and switches native fullscreen. Theatre and web fullscreen switches return focus to the player on activation. With the player focused, I toggles picture-in-picture and T toggles theatre mode. The autoplay switch saves the preference used on the next video.
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.15 Playback startup guard
+title: Iwara Plus v1.1.0 Playback startup guard
 ---
 stateDiagram-v2
     state "Waiting for user playback" as Guarded
@@ -126,7 +130,7 @@ The toolbar also supports copying a filename, downloading the source and opening
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.15 Combined toolbar action
+title: Iwara Plus v1.1.0 Combined toolbar action
 ---
 sequenceDiagram
     actor U as Viewer
@@ -152,11 +156,11 @@ sequenceDiagram
 
 ## Playlist navigation
 
-Playlist pages are cached per video context. Reverse and random modes wait for pending playlist data before advancing at the end of playback. The sidebar extends the visible list by loading pages as needed. In fullscreen the expanded panel can move into the fullscreen element and return to its anchor on exit. Order mode and sidebar collapse state use session storage.
+Playlist pages are cached per video context. Reverse and random modes wait for pending playlist data before advancing at the end of playback. The sidebar loads pages as needed. Native fullscreen can move the expanded sidebar into the fullscreen element and restore it to its anchor on exit. Web fullscreen keeps the sidebar inline and preserves the mode when switching videos within the same playlist. Both Iwara domains use the same metadata and playlist API, and generated links use the current domain. Order mode and sidebar collapse state use session storage.
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.15 Playlist navigation
+title: Iwara Plus v1.1.0 Playlist navigation
 ---
 sequenceDiagram
     participant C as Playlist controls
@@ -188,11 +192,11 @@ sequenceDiagram
 
 ## Fullscreen control visibility
 
-With the sidebar open, the bottom activation area spans only the video width.
+Web fullscreen fills the browser viewport. The switch and Esc exit web fullscreen. With the sidebar open, the bottom activation area and progress line span only the video width.
 
 ```mermaid
 ---
-title: Iwara Plus v1.0.15 Fullscreen control visibility
+title: Iwara Plus v1.1.0 Fullscreen control visibility
 ---
 sequenceDiagram
     participant B as Browser
@@ -205,7 +209,10 @@ sequenceDiagram
             B->>P: Reveal or keep bottom controls visible
         end
         opt Pointer away and no keyboard focus in controls
-            B->>P: Restore native control visibility
+            B->>P: Hide bottom controls
+            opt Web fullscreen
+                P->>P: Show playback progress and buffered ranges
+            end
         end
         opt Near playlist toggle
             B->>S: Stay visible while hovered and fade after about 0.9 s away
